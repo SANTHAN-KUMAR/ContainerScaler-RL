@@ -12,6 +12,9 @@ spec:
     metadata:
       labels:
         app: podinfo
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9898"
     spec:
       containers:
       - name: podinfod

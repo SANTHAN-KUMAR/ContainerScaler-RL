@@ -145,10 +145,10 @@ def run_experiment(
 
 
 def analyze_results(rl_run_name: str, hpa_run_name: str) -> None:
-    # Find CSV paths (MetricsLogger saves to logs/csv/<prefix>_<timestamp>.csv)
-    csv_dir = Path("logs/csv")
+    # Find CSV paths (MetricsLogger saves to logs/live/<prefix>_<timestamp>.csv)
+    csv_dir = Path("logs/live")
     if not csv_dir.exists():
-        logger.error("No metrics logs found in logs/csv")
+        logger.error("No metrics logs found in logs/live")
         return
 
     rl_files = sorted(csv_dir.glob(f"{rl_run_name}_*.csv"))

@@ -67,20 +67,7 @@ class PrometheusObserver:
         np.ndarray
             Observation vector matching simulator format.
         """
-        # 1. Queries
-        cpu_util = self._query_scalar(
-            f'sum(rate(container_cpu_usage_seconds_total{{pod=~"{self.deployment}.*"}}[1m])) / '
-            f'sum(kube_pod_container_resource_limits_cpu_cores{{pod=~"{self.deployment}.*"}})'
-        )
-        mem_bytes = self._query_scalar(
-            f'sum(container_memory_working_set_bytes{{pod=~"{self.deployment}.*"}})'
-        )
-        total_replicas = self._query_scalar(
-            f'kube_deployment_status_replicas{{deployment="{self.deployment}"}}'
-        )
-        ready_replicas = self._query_scalar(
-            f'kube_deployment_status_ready_replicas{{deployment="{self.deployment}"}}'
-        )
+        # 1. Prometheus Queries for HTTP Traffic ONLY
         request_rate = self._query_scalar(
             f'sum(rate(http_requests_total{{app="{self.deployment}"}}[1m]))'
         )
@@ -88,6 +75,50 @@ class PrometheusObserver:
         p99_latency_sec = self._query_scalar(
             f'histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{{app="{self.deployment}"}}[1m])))'
         )
+
+        # 2. Native Kubernetes API for Structural Metrics (CPU, Mem, Replicas)
+        total_replicas = 0.0
+        ready_replicas = 0.0
+        cpu_util = 0.0
+        mem_bytes = 0.0
+
+        if self.apps_v1:
+            try:
+                # Fetch Replicas
+                deployment_info = self.apps_v1.read_namespaced_deployment(self.deployment, self.namespace)
+                total_replicas = float(deployment_info.status.replicas or 0)
+                ready_replicas = float(deployment_info.status.ready_replicas or 0)
+                
+                # Fetch CPU/Memory from metrics.k8s.io (cAdvisor equivalent)
+                cust = client.CustomObjectsApi()
+                pod_metrics = cust.list_namespaced_custom_object("metrics.k8s.io", "v1beta1", self.namespace, "pods")
+                
+                for item in pod_metrics.get('items', []):
+                    if item['metadata']['name'].startswith(self.deployment):
+                        for container in item['containers']:
+                            if container['name'] == 'podinfod':
+                                # Parse CPU (e.g. '15m' or '15000n')
+                                cpu_str = container['usage']['cpu']
+                                if cpu_str.endswith('m'):
+                                    cpu_util += float(cpu_str[:-1]) / 1000.0
+                                elif cpu_str.endswith('n'):
+                                    cpu_util += float(cpu_str[:-1]) / 1e9
+                                
+                                # Parse Memory (e.g. '150Mi' or '150000Ki')
+                                mem_str = container['usage']['memory']
+                                if mem_str.endswith('Mi'):
+                                    mem_bytes += float(mem_str[:-2]) * 1024 * 1024
+                                elif mem_str.endswith('Ki'):
+                                    mem_bytes += float(mem_str[:-2]) * 1024
+                
+                # Normalize CPU against the expected total limits for the deployment (250m per pod)
+                if total_replicas > 0:
+                    cpu_util = cpu_util / (total_replicas * 0.25)
+                else:
+                    cpu_util = 0.0
+
+            except Exception as e:
+                logger.error(f"Failed to fetch Kubernetes core metrics: {e}")
 
         # 2. Derived metrics
         pending_pods = max(0.0, total_replicas - ready_replicas)

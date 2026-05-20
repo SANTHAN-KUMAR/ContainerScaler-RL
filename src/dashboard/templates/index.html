@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContainerScaler-RL Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+<body>
+    <header class="header">
+        <div class="logo-container">
+            <span class="material-icons logo-icon">dynamic_form</span>
+            <h1>ContainerScaler-RL</h1>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline" id="btn-stop-all">
+                <span class="material-icons">stop</span> Stop All Services
+            </button>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Controls Section -->
+        <section class="card controls-section">
+            <h2>Cluster Controls</h2>
+            <p class="subtitle">Manage port-forwarding and simulation traffic.</p>
+            
+            <div class="control-grid">
+                <!-- Port Forwards -->
+                <div class="control-item">
+                    <div class="control-info">
+                        <h3>Prometheus Port-Forward</h3>
+                        <p>Exposes Prometheus API to localhost:30090.</p>
+                    </div>
+                    <button class="btn btn-primary" id="btn-prom" onclick="toggleService('port_forward_prom')">
+                        Start
+                    </button>
+                </div>
+
+                <div class="control-item">
+                    <div class="control-info">
+                        <h3>Podinfo Port-Forward</h3>
+                        <p>Exposes target application to localhost:9898.</p>
+                    </div>
+                    <button class="btn btn-primary" id="btn-podinfo" onclick="toggleService('port_forward_podinfo')">
+                        Start
+                    </button>
+                </div>
+
+                <!-- Live Agent -->
+                <div class="control-item">
+                    <div class="control-info">
+                        <h3>RL Live Agent</h3>
+                        <p>Runs the control loop using ppo_autoscaler.</p>
+                    </div>
+                    <button class="btn btn-primary" id="btn-agent" onclick="toggleService('live_agent')">
+                        Start Agent
+                    </button>
+                </div>
+
+                <!-- Traffic -->
+                <div class="control-item">
+                    <div class="control-info">
+                        <h3>Locust Traffic Generator</h3>
+                        <p>Sends HTTP load to the target application.</p>
+                    </div>
+                    <button class="btn btn-primary" id="btn-locust" onclick="toggleService('locust')">
+                        Generate Traffic
+                    </button>
+                </div>
+
+                <!-- Evaluation -->
+                <div class="control-item" style="grid-column: 1 / -1; background-color: #fce8e6; border-color: #fad2cf;">
+                    <div class="control-info">
+                        <h3>Run Performance Evaluation</h3>
+                        <p>Simulates identical traffic on both RL and Baseline HPA and generates comparison charts.</p>
+                    </div>
+                    <button class="btn btn-primary btn-danger" id="btn-evaluation" onclick="toggleService('evaluation')">
+                        Run Evaluation
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Live System State Section -->
+        <section class="card metrics-section">
+            <div class="viz-header">
+                <h2>Live System State</h2>
+                <div style="font-size: 13px; color: var(--text-secondary);" id="metrics-step">
+                    Waiting for agent...
+                </div>
+            </div>
+            <p class="subtitle">Real-time metrics parsed from the RL agent.</p>
+            
+            <div class="metrics-grid">
+                <!-- Prometheus Inputs -->
+                <div class="metric-card">
+                    <div class="metric-label">Request Traffic</div>
+                    <div class="metric-value" id="val-traffic">--</div>
+                    <div class="metric-sub">RPS</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">P99 Latency</div>
+                    <div class="metric-value" id="val-latency">--</div>
+                    <div class="metric-sub">SLA Target: 200ms</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">CPU Usage</div>
+                    <div class="metric-value" id="val-cpu">--</div>
+                    <div class="metric-sub">Cores</div>
+                </div>
+                
+                <!-- Agent State -->
+                <div class="metric-card highlight">
+                    <div class="metric-label">Target Replicas</div>
+                    <div class="metric-value" id="val-replicas">--</div>
+                    <div class="metric-sub" id="val-pending">0 Pending</div>
+                </div>
+                <div class="metric-card decision-card">
+                    <div class="metric-label">RL Agent Action</div>
+                    <div class="metric-value" id="val-action" style="font-size: 20px;">--</div>
+                    <div class="metric-sub" id="val-proposed">Proposed: --</div>
+                </div>
+                
+                <!-- Rewards -->
+                <div class="metric-card">
+                    <div class="metric-label">SLA Breach</div>
+                    <div class="metric-value" id="val-breach">--</div>
+                    <div class="metric-sub">Penalty</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Live Console Section -->
+        <section class="card console-section">
+            <div class="viz-header">
+                <h2>Live Console Debug Log</h2>
+                <button class="btn btn-icon" onclick="toggleConsole()" title="Toggle Console">
+                    <span class="material-icons">expand_more</span>
+                </button>
+            </div>
+            
+            <div class="terminal-window" id="terminal-output" style="display: none; margin-top: 16px;">
+                <div class="terminal-text">Waiting for agent to start...</div>
+            </div>
+        </section>
+
+        <!-- Visualization Section -->
+        <section class="card visualization-section">
+            <div class="viz-header">
+                <h2>Experiment Trajectories</h2>
+                <div style="display:flex; gap:12px;">
+                    <button class="btn btn-outline" id="btn-plot-now" onclick="generatePlotNow()">
+                        <span class="material-icons">insert_chart</span> Generate Plot Now
+                    </button>
+                    <button class="btn btn-icon" onclick="fetchPlots()" title="Refresh Plots">
+                        <span class="material-icons">refresh</span>
+                    </button>
+                </div>
+            </div>
+            <p class="subtitle">Latest plots from logs/csv will automatically appear here.</p>
+            
+            <div class="gallery" id="plot-gallery">
+                <!-- Plots will be dynamically inserted here -->
+                <div class="empty-state">
+                    <span class="material-icons empty-icon">insert_chart_outlined</span>
+                    <p>No plots generated yet. Start the agent and click Generate Plot Now.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

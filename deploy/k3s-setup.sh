@@ -13,7 +13,7 @@ sleep 15
 kubectl wait --for=condition=Ready nodes --all --timeout=60s
 
 echo "2. Installing Prometheus Stack (simplified for metrics server)..."
-kubectl apply -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/bundle.yaml
+kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/bundle.yaml
 # We will apply a custom prometheus instance in deploy/prometheus.yaml
 
 echo "3. Deploying target application (podinfo)..."
