@@ -1,0 +1,27 @@
+# RecurrentPPO training configuration
+training:
+  total_timesteps: 500000
+  n_envs: 20             # use 20 CPU cores for parallel rollout collection
+  learning_rate: 0.0003
+  n_steps: 1024          # shorter rollouts → more updates
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  ent_coef: 0.001
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  clip_range: 0.2
+  lstm_hidden_size: 256  # wider LSTM → more GPU compute per update
+  net_arch: [512, 512]   # wider MLP layers
+
+  # Checkpointing
+  checkpoint_freq: 50000      # save every N steps
+  save_path: "ppo_autoscaler"
+  log_dir: "./logs/ppo/"
+
+  # Device
+  device: "auto"              # auto-detect GPU; fallback to CPU
+
+  # Reproducibility
+  seed: 42

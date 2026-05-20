@@ -1,0 +1,43 @@
+# K8sSimEnv configuration
+simulator:
+  # Episode structure
+  episode_length: 120        # steps per episode
+  step_duration: 30          # simulated seconds per step
+
+  # SLA
+  sla_target: 200            # ms — P99 latency target
+  base_latency: 10           # ms — minimum latency with no queue
+
+  # Replica bounds
+  min_replicas: 2
+  max_replicas: 30
+
+  # Node configuration (3 simulated nodes)
+  num_nodes: 3
+  node_cpu: 4.0              # cores per node
+  node_mem: 16.0             # GB per node
+  cpu_per_pod: 0.25          # cores per pod (250m)
+  mem_per_pod: 0.5           # GB per pod (512Mi)
+  node_packing_factor: 0.85  # max utilization before new node needed
+
+  # Domain randomization ranges
+  randomization:
+    per_pod_capacity_min: 15   # rps/pod
+    per_pod_capacity_max: 30
+    cold_start_mean_min: 40    # seconds
+    cold_start_mean_max: 100
+    cold_start_sigma: 0.5      # LogNormal σ
+    cold_start_clip_min: 30    # seconds
+    cold_start_clip_max: 180
+    node_price_min: 0.20       # $/hour
+    node_price_max: 0.50
+
+  # Reward weights
+  reward:
+    sla_weight: -10.0
+    cost_weight: -0.01          # reduced from -0.1 so cost doesn't dominate SLA
+    crash_multiplier: -50.0
+    crash_threshold: 5.0        # × SLA target
+    stability_weight: -0.1      # reduced from -0.3 so churn penalty doesn't discourage scaling
+    stability_threshold: 0.5    # × SLA target — below this, penalize churn
+    sla_violation_cap: 5.0      # cap SLA violation ratio to avoid extreme reward spikes

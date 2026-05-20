@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "containerscale-rl"
+version = "1.0.0"
+description = "RL agent for Kubernetes autoscaling — trained in simulation, deployed on live clusters"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    # Simulation & Training
+    "gymnasium>=0.29",
+    "sb3-contrib>=2.0",
+    "stable-baselines3>=2.0",
+    "torch>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "tensorboard>=2.14",
+    "pyyaml>=6.0",
+    "tqdm>=4.65",
+    "rich>=13.0",
+    "optuna>=3.4",
+
+    # Live Cluster
+    "kubernetes>=28.0",
+    "prometheus-api-client>=0.5",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+loadtest = [
+    "locust>=2.20",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+crl-train = "src.training.train_ppo:main"
+crl-tune = "src.training.tune_ppo:main"
+crl-live = "src.live.live_agent:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "configs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
