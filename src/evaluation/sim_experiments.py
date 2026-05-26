@@ -21,6 +21,11 @@ from src.evaluation.metrics import (
     compute_churn,
     compute_max_latency,
     compute_sla_compliance,
+    compute_average_latency,
+    compute_percentile_latency,
+    compute_violation_severity,
+    compute_mean_utilization,
+    compute_total_reward,
 )
 from src.safety.safety_filter import ClusterState
 
@@ -43,6 +48,8 @@ def run_episode(
     latencies = []
     costs = []
     replicas = []
+    rewards = []
+    cpu_utils = []
 
     terminated = False
     truncated = False
@@ -70,6 +77,8 @@ def run_episode(
         latencies.append(info["p99_latency"])
         costs.append(info["cost_rate"])
         replicas.append(info["replicas"])
+        rewards.append(reward)
+        cpu_utils.append(info["cpu_util"])
         step += 1
 
     return {
@@ -77,6 +86,11 @@ def run_episode(
         "avg_cost": compute_average_cost(costs),
         "churn": compute_churn(replicas),
         "max_latency": compute_max_latency(latencies),
+        "avg_latency": compute_average_latency(latencies),
+        "p99_latency": compute_percentile_latency(latencies, 99.0),
+        "severity": compute_violation_severity(latencies, sla_target),
+        "cpu_util": compute_mean_utilization(cpu_utils),
+        "reward": compute_total_reward(rewards),
         "pattern": info["workload_pattern"],
     }
 
@@ -116,12 +130,17 @@ def run_exp1_baseline(n_episodes: int = 100) -> None:
     df_hpa = pd.DataFrame(hpa_results)
     
     print("\n=== Experiment 1 Results (Averages over 100 episodes) ===")
-    print("Metric          | RL+Safety | HPA Baseline")
-    print("----------------+-----------+-------------")
-    print(f"SLA Compliance  | {df_rl['sla_compliance'].mean():.2f}%    | {df_hpa['sla_compliance'].mean():.2f}%")
-    print(f"Average Cost    | ${df_rl['avg_cost'].mean():.2f}/hr | ${df_hpa['avg_cost'].mean():.2f}/hr")
-    print(f"Replica Churn   | {df_rl['churn'].mean():.1f}      | {df_hpa['churn'].mean():.1f}")
-    print(f"Max Latency     | {df_rl['max_latency'].mean():.0f}ms    | {df_hpa['max_latency'].mean():.0f}ms")
+    print("Metric                 | RL+Safety | HPA Baseline")
+    print("-----------------------+-----------+-------------")
+    print(f"SLA Compliance         | {df_rl['sla_compliance'].mean():.2f}%    | {df_hpa['sla_compliance'].mean():.2f}%")
+    print(f"Violation Severity     | {df_rl['severity'].mean():.0f}ms      | {df_hpa['severity'].mean():.0f}ms")
+    print(f"Average Cost           | ${df_rl['avg_cost'].mean():.2f}/hr   | ${df_hpa['avg_cost'].mean():.2f}/hr")
+    print(f"Replica Churn          | {df_rl['churn'].mean():.1f}      | {df_hpa['churn'].mean():.1f}")
+    print(f"Average Latency        | {df_rl['avg_latency'].mean():.0f}ms      | {df_hpa['avg_latency'].mean():.0f}ms")
+    print(f"P99 Latency            | {df_rl['p99_latency'].mean():.0f}ms      | {df_hpa['p99_latency'].mean():.0f}ms")
+    print(f"Max Latency            | {df_rl['max_latency'].mean():.0f}ms    | {df_hpa['max_latency'].mean():.0f}ms")
+    print(f"CPU Utilization        | {df_rl['cpu_util'].mean()*100:.1f}%     | {df_hpa['cpu_util'].mean()*100:.1f}%")
+    print(f"Total Reward           | {df_rl['reward'].mean():.2f}    | {df_hpa['reward'].mean():.2f}")
 
 
 def main() -> None:

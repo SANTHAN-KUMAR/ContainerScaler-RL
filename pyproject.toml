@@ -42,6 +42,7 @@ dev = [
 
 [project.scripts]
 crl-train = "src.training.train_ppo:main"
+crl-train-dqn = "src.training.train_dqn:main"
 crl-tune = "src.training.tune_ppo:main"
 crl-live = "src.live.live_agent:main"
 

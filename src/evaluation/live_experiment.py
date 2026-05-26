@@ -82,7 +82,7 @@ def run_experiment(
         import time
         original_sleep = time.sleep
         def mock_sleep_rl(seconds: float) -> None:
-            if seconds == 30.0:
+            if seconds > 10.0:
                 original_sleep(interval_sec)
             else:
                 original_sleep(seconds)
@@ -105,7 +105,7 @@ def run_experiment(
             executor=exec_hpa,
         )
         def mock_sleep_hpa(seconds: float) -> None:
-            if seconds == 30.0:
+            if seconds > 10.0:
                 original_sleep(interval_sec)
             else:
                 original_sleep(seconds)

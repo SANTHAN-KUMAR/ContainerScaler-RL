@@ -1,0 +1,52 @@
+# DQN / QRDQN training configuration
+# Switch algorithm with the "algorithm" key: "dqn" or "qrdqn"
+training:
+  # Algorithm selection: "dqn" or "qrdqn"
+  # QRDQN = Quantile Regression DQN (distributional RL — models full return
+  # distribution, naturally risk-aware for SLA-critical workloads)
+  algorithm: "qrdqn"
+
+  total_timesteps: 500000
+
+  # Parallelism — 4 envs keeps RAM well under 16GB
+  n_envs: 4
+
+  # Frame stacking — replaces LSTM by concatenating last N observations.
+  # 4 frames × 30s/step = 2 min sliding window of history.
+  frame_stack: 4
+
+  # Off-policy replay buffer
+  buffer_size: 100000       # transitions stored for replay
+  learning_starts: 5000     # random exploration steps before learning begins
+  batch_size: 256           # gradient update batch size
+
+  # Learning
+  learning_rate: 0.0001     # slightly lower than PPO default for stability
+  gamma: 0.99               # discount factor
+  tau: 0.005                # soft update coefficient for target network
+  train_freq: 4             # update every N env steps
+  gradient_steps: 2         # gradient updates per train_freq trigger
+  target_update_interval: 1000  # hard target network sync (DQN only)
+
+  # Exploration (ε-greedy schedule)
+  exploration_fraction: 0.2   # fraction of total timesteps for ε decay
+  exploration_initial_eps: 1.0
+  exploration_final_eps: 0.02
+
+  # QRDQN-specific
+  n_quantiles: 200           # number of quantiles (more = finer distribution)
+
+  # Network architecture — Dueling DQN separates state-value from advantages
+  net_arch: [512, 512]
+  dueling: true
+
+  # Checkpointing
+  checkpoint_freq: 50000
+  save_path: "qrdqn_autoscaler"
+  log_dir: "./logs/qrdqn/"
+
+  # Device — CUDA for GPU acceleration
+  device: "cuda"
+
+  # Reproducibility
+  seed: 42
