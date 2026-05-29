@@ -32,12 +32,19 @@ simulator:
     node_price_min: 0.20       # $/hour
     node_price_max: 0.50
 
-  # Reward weights
+  # Reward configuration — normalized multi-objective
   reward:
-    sla_weight: -10.0
-    cost_weight: -0.01          # reduced from -0.1 so cost doesn't dominate SLA
-    crash_multiplier: -50.0
+    # Alpha: cost-SLA tradeoff dial (0 = pure SLA, 1 = pure cost)
+    # 0.3 means 30% cost focus, 70% SLA focus — balanced starting point
+    alpha: 0.3
+
+    # Crash: multiplicative amplifier when latency exceeds crash_threshold × SLA
+    crash_multiplier: 3.0       # amplifies negative reward (not additive)
     crash_threshold: 5.0        # × SLA target
-    stability_weight: -0.1      # reduced from -0.3 so churn penalty doesn't discourage scaling
+
+    # Stability: penalize replica churn only when latency is comfortable
+    stability_weight: -0.02     # per |delta| — small to avoid discouraging scaling
     stability_threshold: 0.5    # × SLA target — below this, penalize churn
-    sla_violation_cap: 5.0      # cap SLA violation ratio to avoid extreme reward spikes
+
+    # Cap on SLA violation ratio to prevent extreme reward spikes
+    sla_violation_cap: 5.0

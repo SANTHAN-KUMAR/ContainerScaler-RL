@@ -1,7 +1,7 @@
 # RecurrentPPO training configuration
 training:
-  total_timesteps: 500000
-  n_envs: 20             # use 20 CPU cores for parallel rollout collection
+  total_timesteps: 700000
+  n_envs: 8              # 8 parallel envs — good parallelism, reasonable RAM
   learning_rate: 0.0003
   n_steps: 1024          # shorter rollouts → more updates
   batch_size: 256

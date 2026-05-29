@@ -2,7 +2,7 @@
 PrometheusObserver — The Sim-to-Real bridge.
 
 Queries real cluster metrics and normalizes them into the exact same
-22-dimensional observation vector the agent saw during simulation training.
+23-dimensional observation vector the agent saw during simulation training.
 """
 
 from __future__ import annotations
@@ -56,11 +56,12 @@ class PrometheusObserver:
 
         # Stateful metrics
         self.prev_request_rate: float = 0.0
+        self.prev_prev_request_rate: float = 0.0  # for acceleration
         self.prev_cpu_util: float = 0.0
         self.step_count: int = 0
 
     def get_state(self) -> np.ndarray:
-        """Query Prometheus and build the 22-dim normalized observation vector.
+        """Query Prometheus and build the 23-dim normalized observation vector.
 
         Returns
         -------
@@ -139,7 +140,7 @@ class PrometheusObserver:
         cost_rate = max(1.0, math.ceil(total_replicas * 0.25 / (self.node_cpu * 0.85))) * 0.35 # Approx node price
 
         # 3. Build & Normalize vector
-        obs = np.zeros(22, dtype=np.float32)
+        obs = np.zeros(23, dtype=np.float32)
         
         obs[0] = min(1.0, max(0.0, cpu_util if not np.isnan(cpu_util) else 0.0))
         # Appx mem util (512Mi limit)
@@ -164,12 +165,18 @@ class PrometheusObserver:
         obs[20] = cost_rate / 2.0
         obs[21] = self.prev_cpu_util
 
+        # Traffic acceleration (2nd derivative)
+        velocity = request_rate - self.prev_request_rate
+        prev_velocity = self.prev_request_rate - self.prev_prev_request_rate
+        obs[22] = (velocity - prev_velocity) / 500.0
+
         # Update state
+        self.prev_prev_request_rate = self.prev_request_rate
         self.prev_request_rate = request_rate
         self.prev_cpu_util = obs[0]
         self.step_count += 1
 
-        # Clip all values to [0, 1] range except those that can be negative
+        # Clip all values to safe range
         obs = np.nan_to_num(obs)
         obs = np.clip(obs, -1.0, 10.0)
 

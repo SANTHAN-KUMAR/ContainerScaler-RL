@@ -123,21 +123,18 @@ def train(config_path: str | Path | None = None) -> Path:
     # ── Parallel environments ────────────────────────────────────────
     raw_env = SubprocVecEnv([make_env(i, seed) for i in range(n_envs)])
 
-    # ── VecNormalize — fixes the critic by keeping rewards in [-1, 1] ──
-    # norm_obs=False : observations are already normalized in the environment
-    # norm_reward=True: normalizes rewards using a running estimate of variance
-    # clip_obs=10.0  : clips normalized obs to [-10, 10] to prevent outliers
-    # clip_reward=10.0: clips normalized rewards to [-10, 10]
-    # gamma          : must match PPO gamma for correct return normalization
+    # ── VecNormalize ────────────────────────────────────────────────
+    # norm_obs=False  : observations are already normalized in the environment
+    # norm_reward=False: reward is pre-normalized by the new reward function
+    #                   (SLA and cost both in comparable [-1, 0] ranges)
     env = VecNormalize(
         raw_env,
         norm_obs=False,
-        norm_reward=True,
+        norm_reward=False,
         clip_obs=10.0,
-        clip_reward=10.0,
         gamma=gamma,
     )
-    logger.info("VecNormalize enabled — reward normalization is active, observation normalization is disabled")
+    logger.info("VecNormalize enabled — observation and reward normalization both disabled (pre-normalized)")
 
     # ── RecurrentPPO ─────────────────────────────────────────────────
     model = RecurrentPPO(
@@ -172,13 +169,26 @@ def train(config_path: str | Path | None = None) -> Path:
         verbose=1,
     )
 
-    # ── Train ────────────────────────────────────────────────────────
+    # ── Alpha schedule for cyclical annealing ────────────────────────
+    from src.training.alpha_schedule import AlphaScheduleCallback
+
     total_timesteps = cfg["total_timesteps"]
+    alpha_schedule = [
+        (0, 0.1),                          # Start SLA-focused
+        (int(total_timesteps * 0.28), 0.1), # Hold SLA focus
+        (int(total_timesteps * 0.71), 0.4), # Anneal toward cost awareness
+        (int(total_timesteps * 0.71), 0.2), # Drop back for stability
+        (total_timesteps, 0.2),             # Hold to end
+    ]
+    alpha_cb = AlphaScheduleCallback(raw_env, alpha_schedule, verbose=1)
+    logger.info("Alpha schedule: %s", alpha_schedule)
+
+    # ── Train ────────────────────────────────────────────────────────
     logger.info("Starting training for %d timesteps", total_timesteps)
 
     model.learn(
         total_timesteps=total_timesteps,
-        callback=checkpoint_cb,
+        callback=[checkpoint_cb, alpha_cb],
         progress_bar=True,
     )
 

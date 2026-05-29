@@ -33,7 +33,11 @@ class ClusterState:
 
     @classmethod
     def from_obs(cls, obs, *, sla_target: float = 200.0, max_replicas: int = 30) -> "ClusterState":
-        """Construct from the 22-dim observation vector (un-normalize)."""
+        """Construct from the observation vector (22+ dims, un-normalize).
+
+        Only uses indices 0-8 and 20, so forward-compatible with
+        observation space expansions (e.g. 23-dim with acceleration).
+        """
         return cls(
             replicas=int(round(obs[2] * max_replicas)),
             p99_latency=float(obs[6] * 1000.0),

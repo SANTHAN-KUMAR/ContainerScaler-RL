@@ -6,7 +6,7 @@ and 5 traffic patterns.  Designed for RecurrentPPO training at 1000+ steps/sec.
 
 MDP
 ---
-State   : 22-dimensional float vector (see _build_obs)
+State   : 23-dimensional float vector (see _build_obs)
 Action  : Discrete(7) → replica delta in {-3, -2, -1, 0, +1, +2, +3}
 Step    : 30 simulated seconds
 Episode : 120 steps = 1 simulated hour
@@ -60,7 +60,7 @@ class K8sSimEnv(gym.Env):
         # ── Spaces ───────────────────────────────────────────────────
         self.action_space = spaces.Discrete(7)
         self.observation_space = spaces.Box(
-            low=-1.0, high=np.inf, shape=(22,), dtype=np.float32,
+            low=-1.0, high=np.inf, shape=(23,), dtype=np.float32,
         )
 
         # ── Fixed parameters from config ─────────────────────────────
@@ -85,10 +85,9 @@ class K8sSimEnv(gym.Env):
         self._cs_clip = (rand["cold_start_clip_min"], rand["cold_start_clip_max"])
         self._np_range = (rand["node_price_min"], rand["node_price_max"])
 
-        # Reward weights
+        # Reward configuration (normalized system)
         rw = self.cfg["reward"]
-        self._w_sla: float = float(rw["sla_weight"])
-        self._w_cost: float = float(rw["cost_weight"])
+        self._alpha: float = float(rw.get("alpha", 0.3))
         self._w_crash: float = float(rw["crash_multiplier"])
         self._crash_thresh: float = float(rw["crash_threshold"])
         self._w_stab: float = float(rw["stability_weight"])
@@ -107,6 +106,7 @@ class K8sSimEnv(gym.Env):
         self.queue_depth: float = 0.0
         self.request_rate: float = 0.0
         self.prev_request_rate: float = 0.0
+        self.prev_prev_request_rate: float = 0.0  # for acceleration
         self.p99_latency: float = 0.0
         self.cpu_util: float = 0.0
         self.prev_cpu_util: float = 0.0
@@ -118,6 +118,23 @@ class K8sSimEnv(gym.Env):
         self.per_pod_capacity: float = 0.0
         self.cold_start_mean: float = 0.0
         self.node_price: float = 0.0
+
+    # ==================================================================
+    # Alpha control (for cyclical annealing during training)
+    # ==================================================================
+
+    def set_alpha(self, alpha: float) -> None:
+        """Set the cost-SLA tradeoff weight.
+
+        Called by AlphaScheduleCallback during training to implement
+        cyclical annealing of the cost-SLA balance.
+
+        Parameters
+        ----------
+        alpha : float
+            Value in [0, 1]. 0 = pure SLA, 1 = pure cost.
+        """
+        self._alpha = float(alpha)
 
     # ==================================================================
     # Gymnasium interface
@@ -155,6 +172,7 @@ class K8sSimEnv(gym.Env):
         self.workload.reset()
         self.request_rate = self.workload.get_rate(0)
         self.prev_request_rate = self.request_rate
+        self.prev_prev_request_rate = self.request_rate
 
         # Derived metrics at initial state
         self.cpu_util = self._compute_cpu_util()
@@ -187,6 +205,7 @@ class K8sSimEnv(gym.Env):
 
         # 3. Update traffic
         self.step_count += 1
+        self.prev_prev_request_rate = self.prev_request_rate
         self.prev_request_rate = self.request_rate
         self.request_rate = self.workload.get_rate(self.step_count)
 
@@ -311,37 +330,52 @@ class K8sSimEnv(gym.Env):
         return nodes_needed * self.node_price
 
     # ==================================================================
-    # Reward
+    # Reward (normalized multi-objective)
     # ==================================================================
 
     def _compute_reward(self, delta: int) -> float:
-        """Multi-objective reward: SLA + cost + crash + stability."""
-        # SLA penalty — proportional to latency overshoot
-        sla_violation = max(0.0, self.p99_latency - self.sla_target) / self.sla_target
+        """Normalized multi-objective reward with comparable SLA and cost scales.
+
+        Both SLA and cost components are normalized to comparable ranges,
+        then combined using alpha as the tradeoff weight. This eliminates
+        the 1000:1 penalty asymmetry of the original reward function.
+
+        Returns a value typically in [-3, 0] when no crash occurs.
+        """
+        # SLA component: 0 (perfect) to -cap (catastrophic)
+        sla_ratio = max(0.0, self.p99_latency - self.sla_target) / self.sla_target
         if self._sla_violation_cap is not None:
-            sla_violation = min(sla_violation, self._sla_violation_cap)
-        r_sla = self._w_sla * sla_violation
+            sla_ratio = min(sla_ratio, self._sla_violation_cap)
+        r_sla = -sla_ratio  # in [-cap, 0]
 
-        # Cost penalty
-        r_cost = self._w_cost * self.cost_rate
+        # Cost component: normalized to [-1, 0] based on env's own min/max cost
+        min_cost = self.node_price  # 1 node minimum
+        max_cost = math.ceil(
+            self.max_replicas * self.cpu_per_pod / (self.node_cpu * self.packing)
+        ) * self.node_price
+        denom = max(max_cost - min_cost, 1e-6)
+        cost_normalized = (self.cost_rate - min_cost) / denom
+        r_cost = -cost_normalized  # in [-1, 0]
 
-        # Crash penalty — catastrophic latency
-        r_crash = self._w_crash if self.p99_latency > self._crash_thresh * self.sla_target else 0.0
+        # Combine with alpha tradeoff: alpha × cost + (1-alpha) × SLA
+        reward = self._alpha * r_cost + (1.0 - self._alpha) * r_sla
 
-        # Stability penalty — only when latency is comfortable
+        # Crash: multiplicative amplification (avoids additive scale problems)
+        if self.p99_latency > self._crash_thresh * self.sla_target:
+            reward *= self._w_crash
+
+        # Stability: small conditional churn penalty when latency is comfortable
         if self.p99_latency < self._stab_thresh * self.sla_target:
-            r_stability = self._w_stab * abs(delta)
-        else:
-            r_stability = 0.0
+            reward += self._w_stab * abs(delta)
 
-        return r_sla + r_cost + r_crash + r_stability
+        return reward
 
     # ==================================================================
-    # Observation vector (22 dimensions)
+    # Observation vector (23 dimensions)
     # ==================================================================
 
     def _build_obs(self) -> np.ndarray:
-        """Build the 22-dimensional normalized observation vector.
+        """Build the 23-dimensional normalized observation vector.
 
         Layout
         ------
@@ -350,7 +384,7 @@ class K8sSimEnv(gym.Env):
         [2]  replicas / max_replicas
         [3]  len(pending_pods) / 10
         [4]  request_rate / 500
-        [5]  (request_rate - prev_rate) / 100
+        [5]  (request_rate - prev_rate) / 100        (velocity)
         [6]  p99_latency / 1000
         [7]  per_pod_capacity / 30
         [8]  queue_depth / 10000
@@ -359,8 +393,9 @@ class K8sSimEnv(gym.Env):
         [19] cos(2π × step / 120)
         [20] cost_rate / 2.0
         [21] prev_cpu_util
+        [22] traffic acceleration / 500               (NEW: 2nd derivative)
         """
-        obs = np.zeros(22, dtype=np.float32)
+        obs = np.zeros(23, dtype=np.float32)
 
         # Per-deployment (9 dims)
         obs[0] = self.cpu_util
@@ -385,12 +420,18 @@ class K8sSimEnv(gym.Env):
             obs[base + 1] = max(0.0, (self.node_mem - mem_used_per_node) / self.node_mem)
             obs[base + 2] = pods_per_node / 30.0
 
-        # Global (4 dims)
+        # Global (5 dims — was 4, added acceleration)
         phase = 2.0 * np.pi * self.step_count / self.episode_length
         obs[18] = np.sin(phase)
         obs[19] = np.cos(phase)
         obs[20] = self.cost_rate / 2.0
         obs[21] = self.prev_cpu_util
+
+        # Traffic acceleration (2nd derivative of request rate)
+        # Tells the agent whether traffic is accelerating or decelerating
+        velocity = self.request_rate - self.prev_request_rate
+        prev_velocity = self.prev_request_rate - self.prev_prev_request_rate
+        obs[22] = (velocity - prev_velocity) / 500.0
 
         return obs
 

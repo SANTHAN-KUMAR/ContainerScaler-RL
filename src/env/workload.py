@@ -11,8 +11,15 @@ from __future__ import annotations
 
 import numpy as np
 
-# All available traffic patterns
+# Training patterns — used during RL training
 PATTERNS = ("steady", "diurnal", "flash_crowd", "gradual_ramp", "noisy")
+
+# Held-out patterns — NEVER used in training, only for evaluation.
+# If the agent degrades >10% on these, it has overfit to the training patterns.
+HELD_OUT_PATTERNS = ("double_peak", "sawtooth")
+
+# All patterns combined (for evaluation scripts)
+ALL_PATTERNS = PATTERNS + HELD_OUT_PATTERNS
 
 
 class WorkloadGenerator:
@@ -53,11 +60,13 @@ class WorkloadGenerator:
         """Select a (possibly random) pattern for the next episode."""
         if self._requested_pattern == "random":
             self.pattern = self._rng.choice(PATTERNS)
+        elif self._requested_pattern == "held_out_random":
+            self.pattern = self._rng.choice(HELD_OUT_PATTERNS)
         else:
-            if self._requested_pattern not in PATTERNS:
+            if self._requested_pattern not in ALL_PATTERNS:
                 raise ValueError(
                     f"Unknown pattern '{self._requested_pattern}'. "
-                    f"Choose from {PATTERNS} or 'random'."
+                    f"Choose from {ALL_PATTERNS}, 'random', or 'held_out_random'."
                 )
             self.pattern = self._requested_pattern
 
@@ -77,6 +86,10 @@ class WorkloadGenerator:
             return self._gradual_ramp(t)
         if self.pattern == "noisy":
             return self._noisy()
+        if self.pattern == "double_peak":
+            return self._double_peak(step)
+        if self.pattern == "sawtooth":
+            return self._sawtooth(step)
         raise ValueError(f"Invalid pattern: {self.pattern}")
 
     def _steady(self) -> float:
@@ -117,3 +130,31 @@ class WorkloadGenerator:
 
     def __repr__(self) -> str:
         return f"WorkloadGenerator(pattern={self.pattern!r})"
+
+    # ------------------------------------------------------------------
+    # Held-out patterns (evaluation only — never used in training)
+    # ------------------------------------------------------------------
+
+    def _double_peak(self, step: int) -> float:
+        """Two sine peaks at t=0.25 and t=0.75 — tests multi-modal anticipation.
+
+        Peak 1: ~350 rps at step 30, Peak 2: ~350 rps at step 90.
+        """
+        noise = self._rng.normal(0.0, 5.0)
+        base = 100.0
+        peak = 250.0 * (
+            np.sin(2.0 * np.pi * step / 60.0) ** 2  # two peaks per episode
+        )
+        return base + peak + noise
+
+    def _sawtooth(self, step: int) -> float:
+        """Linear ramp 50→300, instant drop to 50, repeat 3× — tests rapid recovery.
+
+        Each cycle is 40 steps. Ramp for 38 steps, then instant drop.
+        """
+        noise = self._rng.normal(0.0, 5.0)
+        cycle_length = 40
+        pos_in_cycle = step % cycle_length
+        ramp_progress = pos_in_cycle / (cycle_length - 2)
+        rate = 50.0 + 250.0 * min(ramp_progress, 1.0)
+        return rate + noise

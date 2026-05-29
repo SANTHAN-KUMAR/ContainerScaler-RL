@@ -6,7 +6,7 @@ training:
   # distribution, naturally risk-aware for SLA-critical workloads)
   algorithm: "qrdqn"
 
-  total_timesteps: 500000
+  total_timesteps: 700000
 
   # Parallelism — 4 envs keeps RAM well under 16GB
   n_envs: 4

@@ -191,23 +191,22 @@ def train(config_path: str | Path | None = None, algo_override: str | None = Non
     raw_env = SubprocVecEnv([make_env(i, seed) for i in range(n_envs)])
 
     # ── Frame stacking — gives temporal context without LSTM ─────────
-    # Concatenates last N observations: 22-dim × 4 frames = 88-dim input
+    # Concatenates last N observations: 23-dim × 4 frames = 92-dim input
     stacked_env = VecFrameStack(raw_env, n_stack=frame_stack)
     logger.info(
         "VecFrameStack enabled: %d frames → obs shape %s",
         frame_stack, stacked_env.observation_space.shape,
     )
 
-    # ── VecNormalize — reward normalization ──────────────────────────
+    # ── VecNormalize — observation passthrough, reward pre-normalized ──
     env = VecNormalize(
         stacked_env,
         norm_obs=False,       # obs already normalized in the environment
-        norm_reward=True,     # normalize rewards with running variance
+        norm_reward=False,    # reward is pre-normalized (SLA and cost in comparable ranges)
         clip_obs=10.0,
-        clip_reward=10.0,
         gamma=gamma,
     )
-    logger.info("VecNormalize enabled — reward normalization active")
+    logger.info("VecNormalize enabled — reward normalization disabled (pre-normalized)")
 
     # ── Build model ──────────────────────────────────────────────────
     # Override log/save paths based on actual algorithm
@@ -231,13 +230,26 @@ def train(config_path: str | Path | None = None, algo_override: str | None = Non
         verbose=1,
     )
 
-    # ── Train ────────────────────────────────────────────────────────
+    # ── Alpha schedule for cyclical annealing ────────────────────────
+    from src.training.alpha_schedule import AlphaScheduleCallback
+
     total_timesteps = cfg["total_timesteps"]
+    alpha_schedule = [
+        (0, 0.1),                          # Start SLA-focused
+        (int(total_timesteps * 0.28), 0.1), # Hold SLA focus
+        (int(total_timesteps * 0.71), 0.4), # Anneal toward cost awareness
+        (int(total_timesteps * 0.71), 0.2), # Drop back for stability
+        (total_timesteps, 0.2),             # Hold to end
+    ]
+    alpha_cb = AlphaScheduleCallback(raw_env, alpha_schedule, verbose=1)
+    logger.info("Alpha schedule: %s", alpha_schedule)
+
+    # ── Train ────────────────────────────────────────────────────────
     logger.info("Starting %s training for %d timesteps", algo.upper(), total_timesteps)
 
     model.learn(
         total_timesteps=total_timesteps,
-        callback=checkpoint_cb,
+        callback=[checkpoint_cb, alpha_cb],
         progress_bar=True,
     )
 
