@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 import pandas as pd
+from scipy.stats import mannwhitneyu
 
 from src.agents.agent import ContainerScaleAgent
 from src.agents.hpa_baseline import RealisticHPA
@@ -124,26 +125,54 @@ def _run_paired_episodes(
 
 
 def _print_comparison(df_rl: pd.DataFrame, df_hpa: pd.DataFrame, title: str) -> None:
-    """Print a formatted comparison table of RL vs HPA metrics."""
-    rl_score = composite_score(df_rl["sla_compliance"].mean(), df_rl["avg_cost"].mean())
-    hpa_score = composite_score(df_hpa["sla_compliance"].mean(), df_hpa["avg_cost"].mean())
+    """Print a formatted comparison table of RL vs HPA metrics with rigorous statistics."""
+    
+    # Compute per-episode composite scores for statistical testing
+    df_rl["composite"] = df_rl.apply(lambda row: composite_score(row["sla_compliance"], row["avg_cost"]), axis=1)
+    df_hpa["composite"] = df_hpa.apply(lambda row: composite_score(row["sla_compliance"], row["avg_cost"]), axis=1)
+
+    rl_score = df_rl["composite"].mean()
+    hpa_score = df_hpa["composite"].mean()
+
+    # Mann-Whitney U Test for statistical significance
+    try:
+        if len(df_rl) > 1 and len(df_hpa) > 1:
+            _, p_value = mannwhitneyu(df_rl["composite"], df_hpa["composite"], alternative="two-sided")
+        else:
+            p_value = 1.0
+    except ValueError:
+        p_value = 1.0
 
     print(f"\n=== {title} ===")
-    print(f"{'Metric':<23} | {'RL+Safety':>10} | {'HPA Baseline':>12}")
-    print("-" * 23 + "-+-" + "-" * 10 + "-+-" + "-" * 12)
-    print(f"{'SLA Compliance':<23} | {df_rl['sla_compliance'].mean():>9.2f}% | {df_hpa['sla_compliance'].mean():>11.2f}%")
-    print(f"{'Violation Severity':<23} | {df_rl['severity'].mean():>8.0f}ms | {df_hpa['severity'].mean():>10.0f}ms")
-    print(f"{'Average Cost':<23} | ${df_rl['avg_cost'].mean():>8.2f}/hr | ${df_hpa['avg_cost'].mean():>9.2f}/hr")
-    print(f"{'Replica Churn':<23} | {df_rl['churn'].mean():>10.1f} | {df_hpa['churn'].mean():>12.1f}")
-    print(f"{'Average Latency':<23} | {df_rl['avg_latency'].mean():>8.0f}ms | {df_hpa['avg_latency'].mean():>10.0f}ms")
-    print(f"{'P99 Latency':<23} | {df_rl['p99_latency'].mean():>8.0f}ms | {df_hpa['p99_latency'].mean():>10.0f}ms")
-    print(f"{'Max Latency':<23} | {df_rl['max_latency'].mean():>8.0f}ms | {df_hpa['max_latency'].mean():>10.0f}ms")
-    print(f"{'CPU Utilization':<23} | {df_rl['cpu_util'].mean()*100:>9.1f}% | {df_hpa['cpu_util'].mean()*100:>11.1f}%")
-    print(f"{'Total Reward':<23} | {df_rl['reward'].mean():>10.2f} | {df_hpa['reward'].mean():>12.2f}")
-    print(f"{'Composite Score':<23} | {rl_score:>10.3f} | {hpa_score:>12.3f}")
+    print(f"{'Metric':<23} | {'RL+Safety (Mean ± SD)':>22} | {'HPA Baseline (Mean ± SD)':>24}")
+    print("-" * 23 + "-+-" + "-" * 22 + "-+-" + "-" * 24)
+
+    def fmt(df, col, suffix="", is_int=False, is_cost=False):
+        mean = df[col].mean()
+        std = df[col].std() if len(df) > 1 else 0.0
+        prefix = "$" if is_cost else ""
+        if is_int:
+            return f"{prefix}{mean:>6.0f} ± {std:>4.0f}{suffix}"
+        return f"{prefix}{mean:>6.2f} ± {std:>4.2f}{suffix}"
+
+    print(f"{'SLA Compliance':<23} | {fmt(df_rl, 'sla_compliance', '%'):>22} | {fmt(df_hpa, 'sla_compliance', '%'):>24}")
+    print(f"{'Violation Severity':<23} | {fmt(df_rl, 'severity', 'ms', True):>22} | {fmt(df_hpa, 'severity', 'ms', True):>24}")
+    print(f"{'Average Cost':<23} | {fmt(df_rl, 'avg_cost', '/hr', False, True):>22} | {fmt(df_hpa, 'avg_cost', '/hr', False, True):>24}")
+    print(f"{'Replica Churn':<23} | {fmt(df_rl, 'churn'):>22} | {fmt(df_hpa, 'churn'):>24}")
+    print(f"{'Average Latency':<23} | {fmt(df_rl, 'avg_latency', 'ms', True):>22} | {fmt(df_hpa, 'avg_latency', 'ms', True):>24}")
+    print(f"{'P99 Latency':<23} | {fmt(df_rl, 'p99_latency', 'ms', True):>22} | {fmt(df_hpa, 'p99_latency', 'ms', True):>24}")
+    print(f"{'Max Latency':<23} | {fmt(df_rl, 'max_latency', 'ms', True):>22} | {fmt(df_hpa, 'max_latency', 'ms', True):>24}")
+    
+    df_rl['cpu_util_pct'] = df_rl['cpu_util'] * 100
+    df_hpa['cpu_util_pct'] = df_hpa['cpu_util'] * 100
+    print(f"{'CPU Utilization':<23} | {fmt(df_rl, 'cpu_util_pct', '%'):>22} | {fmt(df_hpa, 'cpu_util_pct', '%'):>24}")
+    
+    print(f"{'Total Reward':<23} | {fmt(df_rl, 'reward'):>22} | {fmt(df_hpa, 'reward'):>24}")
+    print(f"{'Composite Score':<23} | {fmt(df_rl, 'composite'):>22} | {fmt(df_hpa, 'composite'):>24}")
 
     winner = "RL" if rl_score > hpa_score else "HPA"
-    print(f"\n  → Winner (composite): {winner}")
+    sig_str = f"(p={p_value:.4f} - {'Significant' if p_value < 0.05 else 'Not Significant'})"
+    print(f"\n  → Winner (composite): {winner} {sig_str}")
 
 
 def run_exp1_baseline(n_episodes: int = 100, model_path: str = "ppo_autoscaler") -> None:
@@ -230,8 +259,8 @@ def run_exp9_generalization(n_episodes: int = 50, model_path: str = "ppo_autosca
     gap = abs(train_score - held_score) / max(train_score, 0.01) * 100
 
     print(f"\n=== Generalization Gap ===")
-    print(f"  Training composite score:  {train_score:.3f}")
-    print(f"  Held-out composite score:  {held_score:.3f}")
+    print(f"  Training composite score:  {train_score:.3f} ± {df_train_rl['composite'].std():.3f}")
+    print(f"  Held-out composite score:  {held_score:.3f} ± {df_held_rl['composite'].std():.3f}")
     print(f"  Gap: {gap:.1f}%")
     if gap > 10:
         print("  ⚠️  Gap > 10% — possible overfitting detected!")
