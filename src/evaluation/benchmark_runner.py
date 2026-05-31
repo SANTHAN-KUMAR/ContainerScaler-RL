@@ -113,6 +113,16 @@ def _load_agents(model_paths: list[str]) -> dict[str, tuple[Any, str]]:
     agents["Reactive"] = (ReactiveThresholdBaseline(), "reactive")
 
     for path in model_paths:
+        # Special case: ensemble meta-agent
+        if path == "ensemble":
+            try:
+                from src.agents.ensemble_agent import EnsembleMetaAgent
+                agents["RL-Ensemble"] = (EnsembleMetaAgent(), "rl")
+                logger.info("Loaded Ensemble Meta-Agent")
+            except Exception as e:
+                logger.warning("Skipping ensemble — could not load: %s", e)
+            continue
+
         name = Path(path).stem.replace("_autoscaler", "").upper()
         try:
             agents[f"RL-{name}"] = (ContainerScaleAgent(model_path=path), "rl")

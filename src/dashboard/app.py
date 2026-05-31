@@ -5,6 +5,7 @@ import psutil
 from flask import Flask, jsonify, request, render_template, send_from_directory
 from pathlib import Path
 import logging
+import sys
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,16 @@ def kill_process_tree(pid):
     except psutil.NoSuchProcess:
         pass
 
+def kill_dangling_port_forwards(svc_name=None):
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            cmdline = proc.info.get('cmdline')
+            if cmdline and 'port-forward' in cmdline:
+                if svc_name is None or svc_name in cmdline:
+                    proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+
 def is_running(proc):
     return proc is not None and proc.poll() is None
 
@@ -60,15 +71,20 @@ def start_service(service):
     log_file = open(log_file_path, "w")
 
     try:
+        is_win = sys.platform == "win32"
+        kubectl_cmd = "kubectl"
+        python_cmd = sys.executable
+        locust_cmd = sys.executable
+
         if service == "port_forward_prom":
-            subprocess.run(["pkill", "-f", "port-forward svc/prometheus"], stderr=subprocess.DEVNULL)
-            cmd = ["/usr/local/bin/kubectl", "port-forward", "svc/prometheus", "30090:9090"]
+            kill_dangling_port_forwards("svc/prometheus")
+            cmd = [kubectl_cmd, "port-forward", "svc/prometheus", "30090:9090"]
         elif service == "port_forward_podinfo":
-            subprocess.run(["pkill", "-f", "port-forward svc/podinfo"], stderr=subprocess.DEVNULL)
-            cmd = ["/usr/local/bin/kubectl", "port-forward", "svc/podinfo", "9898:9898"]
+            kill_dangling_port_forwards("svc/podinfo")
+            cmd = [kubectl_cmd, "port-forward", "svc/podinfo", "9898:9898"]
         elif service == "live_agent":
             cmd = [
-                "./venv/bin/python", "-m", "src.live.live_agent",
+                python_cmd, "-m", "src.live.live_agent",
                 "--prom", "http://localhost:30090",
                 "--namespace", "default",
                 "--deployment", "podinfo",
@@ -78,13 +94,13 @@ def start_service(service):
             ]
         elif service == "locust":
             cmd = [
-                "./venv/bin/locust", "-f", "deploy/locustfile.py",
+                locust_cmd, "-m", "locust", "-f", "deploy/locustfile.py",
                 "--headless", "-u", "100", "-r", "10",
                 "--run-time", "15m", "--host", "http://localhost:9898"
             ]
         elif service == "evaluation":
             cmd = [
-                "./venv/bin/python", "-m", "src.evaluation.live_experiment",
+                python_cmd, "-m", "src.evaluation.live_experiment",
                 "--mode", "sim"
             ]
 
@@ -121,7 +137,7 @@ def stop_all():
         if proc and is_running(proc):
             kill_process_tree(proc.pid)
             processes[service] = None
-    subprocess.run(["pkill", "-f", "port-forward"], stderr=subprocess.DEVNULL)
+    kill_dangling_port_forwards()
     return jsonify({"message": "Stopped all services"}), 200
 
 @app.route('/api/logs/<service>', methods=['GET'])
