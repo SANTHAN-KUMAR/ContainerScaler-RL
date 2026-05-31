@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Command Center — ContainerScaler</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-brand">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></svg>
+            CONTAINERSCALER
+        </a>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Mission</a>
+            <a href="/live" class="nav-link active">Live Control</a>
+            <a href="/simulator" class="nav-link">Simulator</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+        <div class="nav-status">
+            <div class="status-dot" id="global-status-dot"></div>
+            <span id="global-status-text">Standby</span>
+        </div>
+    </nav>
+
+    <div class="page-body page-container">
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+                <div class="section-label">Real-time Telemetry</div>
+                <h1>Live Command Center</h1>
+                <div class="sub">Monitoring active Kubernetes cluster and RL agent.</div>
+            </div>
+            <div class="sim-controls">
+                <button class="btn btn-ghost" id="btn-prom" onclick="toggleService('port_forward_prom')">Prometheus Bridge</button>
+                <button class="btn btn-ghost" id="btn-podinfo" onclick="toggleService('port_forward_podinfo')">Cluster Bridge</button>
+                <div style="width: 1px; height: 24px; background: var(--border); margin: 0 8px;"></div>
+                <button class="btn btn-danger" id="btn-locust" onclick="toggleService('locust')">Inject Chaos</button>
+                <button class="btn btn-amber" id="btn-agent" onclick="toggleService('live_agent')">Deploy RL Agent</button>
+            </div>
+        </div>
+
+        <div class="metric-grid" style="margin-bottom: 1.5rem;">
+            <div class="metric-card" id="card-traffic">
+                <div class="metric-label">Incoming Request Rate</div>
+                <div class="metric-value"><span id="val-traffic">0</span><span class="unit">rps</span></div>
+                <div class="metric-sub" id="val-traffic-sub">Awaiting data...</div>
+            </div>
+            <div class="metric-card" id="card-latency">
+                <div class="metric-label">P99 Latency</div>
+                <div class="metric-value"><span id="val-latency">0</span><span class="unit">ms</span></div>
+                <div class="metric-sub" id="val-breach">SLA Target: 200ms</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Cluster Size</div>
+                <div class="metric-value"><span id="val-replicas">0</span><span class="unit">pods</span></div>
+                <div class="metric-sub" id="val-pending">0 booting</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Agent Action</div>
+                <div class="metric-value" id="val-action">HOLD</div>
+                <div class="metric-sub" id="val-action-sub">System stable</div>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <!-- Left: Cluster Grid -->
+            <div class="card" style="display: flex; flex-direction: column;">
+                <div class="card-header">
+                    <h3>Active Infrastructure</h3>
+                    <div class="badge badge-blue" id="step-badge">Step 0</div>
+                </div>
+                <div class="pod-grid" id="cluster-grid" style="flex: 1;">
+                    <div class="empty-state">No pods active. Start the agent or cluster bridge.</div>
+                </div>
+            </div>
+
+            <!-- Right: Action Log -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Agent Decision Log</h3>
+                    <button class="btn btn-ghost btn-sm" onclick="clearLog()">Clear</button>
+                </div>
+                <div class="action-log" id="action-log">
+                    <div class="empty-state">Waiting for agent loop...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/live.js"></script>
+</body>
+</html>

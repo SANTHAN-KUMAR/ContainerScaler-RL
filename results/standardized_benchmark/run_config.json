@@ -1,0 +1,21 @@
+{
+  "model_paths": [
+    "ppo_autoscaler",
+    "dqn_autoscaler",
+    "qrdqn_autoscaler",
+    "ensemble"
+  ],
+  "patterns": [
+    "steady",
+    "diurnal",
+    "flash_crowd",
+    "gradual_ramp",
+    "noisy",
+    "double_peak",
+    "sawtooth"
+  ],
+  "n_seeds": 2,
+  "episodes_per_seed": 10,
+  "sla_target": 200.0,
+  "timestamp": "2026-05-31T17:10:56.576010"
+}

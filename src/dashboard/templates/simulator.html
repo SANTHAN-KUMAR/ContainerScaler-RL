@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulator Arena — ContainerScaler</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-brand">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></svg>
+            CONTAINERSCALER
+        </a>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Mission</a>
+            <a href="/live" class="nav-link">Live Control</a>
+            <a href="/simulator" class="nav-link active">Simulator</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+        <div class="nav-status">
+            <div class="status-dot" id="global-status-dot"></div>
+            <span id="global-status-text">Standby</span>
+        </div>
+    </nav>
+
+    <div class="page-body page-container">
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+                <div class="section-label">War Games</div>
+                <h1>Simulation Arena</h1>
+                <div class="sub">Test agents against hostile traffic patterns at 1000x speed.</div>
+            </div>
+        </div>
+
+        <div class="two-col" id="setup-panel">
+            <!-- Left: Scenarios -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>1. Select Threat Scenario</h3>
+                </div>
+                <div class="scenario-grid" id="scenario-grid">
+                    <div class="scenario-card selected" data-scenario="flash_crowd">
+                        <div class="difficulty amber">HARD</div>
+                        <div class="icon">⚡</div>
+                        <div class="name">Flash Crowd</div>
+                        <div class="desc">Sudden massive spike in traffic at t=30%. Tests rapid scale-up.</div>
+                    </div>
+                    <div class="scenario-card" data-scenario="diurnal">
+                        <div class="difficulty green">NORMAL</div>
+                        <div class="icon">🌊</div>
+                        <div class="name">Diurnal Cycle</div>
+                        <div class="desc">Smooth sine wave. Tests scale-down efficiency.</div>
+                    </div>
+                    <div class="scenario-card" data-scenario="double_peak">
+                        <div class="difficulty red">EXTREME</div>
+                        <div class="icon">🏔️</div>
+                        <div class="name">Double Peak</div>
+                        <div class="desc">Two consecutive spikes. Held-out evaluation pattern.</div>
+                    </div>
+                    <div class="scenario-card" data-scenario="sawtooth">
+                        <div class="difficulty red">EXTREME</div>
+                        <div class="icon">🦈</div>
+                        <div class="name">Sawtooth Drop</div>
+                        <div class="desc">Slow ramp followed by instant drop. Tests panic recovery.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Config & Controls -->
+            <div class="card" style="display: flex; flex-direction: column;">
+                <div class="card-header">
+                    <h3>2. Select Agent Payload</h3>
+                </div>
+                <div class="agent-selector" id="agent-selector" style="margin-bottom: 1.5rem;">
+                    <div class="agent-option selected" data-agent="ensemble">
+                        <div class="agent-name">Ensemble (MoE)</div>
+                        <div class="agent-desc">Mixture of Experts</div>
+                    </div>
+                    <div class="agent-option" data-agent="ppo">
+                        <div class="agent-name">Recurrent PPO</div>
+                        <div class="agent-desc">LSTM-based policy</div>
+                    </div>
+                    <div class="agent-option" data-agent="dqn">
+                        <div class="agent-name">DQN</div>
+                        <div class="agent-desc">Value-based discrete</div>
+                    </div>
+                    <div class="agent-option" data-agent="hpa">
+                        <div class="agent-name">Legacy HPA</div>
+                        <div class="agent-desc">Reactive baseline</div>
+                    </div>
+                </div>
+
+                <div class="card-header" style="margin-top: auto;">
+                    <h3>3. Execution Parameters</h3>
+                </div>
+                <div class="sim-controls">
+                    <button class="btn btn-amber btn-lg" id="btn-run" onclick="startSim(false)">▶ Run Simulation</button>
+                    <button class="btn btn-ghost btn-lg" id="btn-fast" onclick="startSim(true)">⏩ Fast Forward</button>
+                    <button class="btn btn-blue btn-lg" style="background: rgba(74,158,255,0.15); color: var(--blue); border: 1px solid var(--blue);" id="btn-bench" onclick="startBenchmark()">🏆 Run Full Benchmark</button>
+                    <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+                        <label class="muted" style="font-size: 12px;">Speed:</label>
+                        <input type="range" id="speed-slider" class="speed-slider" min="0" max="200" value="50">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIMULATION ACTIVE VIEW (Hidden by default) -->
+        <div id="active-panel" style="display: none; margin-top: 1.5rem;">
+            <div class="card" style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <div class="label" id="sim-title">RUNNING: Flash Crowd / PPO</div>
+                    <div class="label amber" id="sim-time">Step 0 / 120</div>
+                </div>
+                <div class="progress-wrap">
+                    <div class="progress-bar" id="sim-progress" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="two-col">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Cluster Simulation</h3>
+                        <button class="btn btn-danger btn-sm" onclick="cancelSim()">Abort</button>
+                    </div>
+                    
+                    <div class="metric-grid" style="margin-bottom: 1rem;">
+                        <div class="metric-card" id="sim-card-latency">
+                            <div class="metric-label">P99 Latency</div>
+                            <div class="metric-value"><span id="sim-val-latency">0</span><span class="unit">ms</span></div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Hourly Cost</div>
+                            <div class="metric-value"><span id="sim-val-cost">0</span><span class="unit">$/hr</span></div>
+                        </div>
+                    </div>
+
+                    <div class="pod-grid" id="sim-cluster-grid" style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); min-height: 120px;">
+                        <!-- Pods -->
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Telemetry Stream</h3>
+                    </div>
+                    <div class="action-log" id="sim-log" style="height: 300px;">
+                        <!-- Logs -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCORECARD MODAL (Hidden by default) -->
+        <div id="scorecard-panel" style="display: none; margin-top: 1.5rem;">
+            <div class="card scorecard">
+                <div class="label amber" style="margin-bottom: 1rem;">MISSION ACCOMPLISHED</div>
+                <div class="grade-display" id="score-grade">S</div>
+                <h2 style="margin: 1rem 0 2rem;">Agent Performance Rating</h2>
+                
+                <div class="scorecard-stats">
+                    <div class="metric-card">
+                        <div class="metric-label">SLA Compliance</div>
+                        <div class="metric-value"><span id="score-sla">100</span><span class="unit">%</span></div>
+                        <div class="metric-sub" id="score-breaches">0 Breaches</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Avg Efficiency</div>
+                        <div class="metric-value"><span id="score-cost">1.25</span><span class="unit">$/hr</span></div>
+                        <div class="metric-sub muted">Infrastructure Cost</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Max Latency Spike</div>
+                        <div class="metric-value"><span id="score-max-lat">180</span><span class="unit">ms</span></div>
+                        <div class="metric-sub muted">Peak distress</div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 2rem;">
+                    <button class="btn btn-ghost" onclick="resetSim()">Run Another Scenario</button>
+                    <a href="/analytics" class="btn btn-amber" style="margin-left: 1rem;">View Full Analytics</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- BENCHMARK PANEL (Hidden by default) -->
+        <div id="benchmark-panel" style="display: none; margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Benchmark Report: <span id="bench-agent-name" class="amber">Ensemble (MoE)</span></h3>
+                    <button class="btn btn-ghost btn-sm" onclick="cancelSim()">Close</button>
+                </div>
+                
+                <div class="progress-wrap" style="margin-bottom: 1rem;">
+                    <div class="progress-bar" id="bench-progress" style="width: 0%"></div>
+                </div>
+                <div id="bench-status" class="label muted" style="margin-bottom: 2rem;">Initializing...</div>
+
+                <table class="compare-table" id="bench-table">
+                    <thead>
+                        <tr>
+                            <th>Scenario</th>
+                            <th>SLA Compliance</th>
+                            <th>Avg Cost/hr</th>
+                            <th>Max Latency</th>
+                            <th>Over-Provisioning</th>
+                            <th>Composite Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bench-tbody">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/simulator.js"></script>
+</body>
+</html>

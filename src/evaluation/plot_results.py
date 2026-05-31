@@ -378,6 +378,49 @@ def plot_reaction_and_settling(df: pd.DataFrame, save_path: Path) -> None:
     plt.close(fig)
     logger.info("Saved: %s", save_path)
 
+def plot_latency_cdf(trajectories: dict, save_path: Path, sla_target: float = 200.0) -> None:
+    """Cumulative Distribution Function of per-step latencies.
+
+    Shows the full distribution of individual step latencies, not episode
+    averages. This exposes tail behavior that box plots and means hide.
+    The vertical SLA line makes it clear what fraction of requests breach.
+    """
+    _setup_style()
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    agent_latencies: dict[str, list[float]] = {}
+    for key, traj in trajectories.items():
+        agent = traj["agent"]
+        lats = traj.get("latencies", [])
+        if agent not in agent_latencies:
+            agent_latencies[agent] = []
+        agent_latencies[agent].extend(lats)
+
+    for agent in sorted(agent_latencies.keys()):
+        lats = sorted(agent_latencies[agent])
+        n = len(lats)
+        if n == 0:
+            continue
+        cdf = np.arange(1, n + 1) / n * 100
+        color = _get_color(agent)
+        ax.plot(lats, cdf, color=color, label=agent, linewidth=2, alpha=0.85)
+
+    # SLA target line
+    ax.axvline(x=sla_target, color="#E57373", linestyle="--", linewidth=2,
+               alpha=0.8, label=f"SLA Target ({sla_target}ms)")
+
+    ax.set_xlabel("P99 Latency (ms)", fontsize=12)
+    ax.set_ylabel("Cumulative % of Steps", fontsize=12)
+    ax.set_title("Latency CDF — Full Distribution of Per-Step Latencies",
+                 fontsize=14, fontweight="bold", pad=15)
+    ax.legend(loc="lower right", framealpha=0.8, fontsize=9)
+    ax.set_xlim(left=0)
+    ax.set_ylim(0, 100)
+    plt.tight_layout()
+    fig.savefig(save_path)
+    plt.close(fig)
+    logger.info("Saved: %s", save_path)
+
 
 # ======================================================================
 # Main entry point
@@ -415,6 +458,7 @@ def generate_all_plots(results_dir: Path | str) -> None:
         with open(traj_path) as f:
             trajectories = json.load(f)
         plot_trajectory_overlay(trajectories, traj_dir)
+        plot_latency_cdf(trajectories, plots_dir / "latency_cdf.png")
     else:
         logger.warning("No trajectories.json found, skipping trajectory plots")
 

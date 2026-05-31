@@ -221,7 +221,11 @@ def run_benchmark(
     (out / "statistical_tests.json").write_text(
         json.dumps(stat_results, indent=2, default=str))
 
-    _print_summary(df, stat_results, elapsed)
+    failure_analysis = _build_failure_analysis(df)
+    (out / "failure_analysis.json").write_text(
+        json.dumps(failure_analysis, indent=2, default=str))
+
+    _print_summary(df, stat_results, failure_analysis, elapsed)
 
     try:
         from src.evaluation.plot_results import generate_all_plots
@@ -292,7 +296,46 @@ def _run_statistical_tests(df: pd.DataFrame) -> dict[str, Any]:
     return {"pairwise": tests, "stability": stability}
 
 
-def _print_summary(df: pd.DataFrame, stats: dict, elapsed: float) -> None:
+def _build_failure_analysis(df: pd.DataFrame) -> dict[str, Any]:
+    """Report worst-case episodes, catastrophic failures, and P5 scores.
+
+    This section exists to prevent the benchmark from hiding failures.
+    Every agent's worst moment is reported transparently.
+    """
+    analysis: dict[str, Any] = {}
+
+    for agent in sorted(df["agent"].unique()):
+        ad = df[df["agent"] == agent]
+        worst_idx = ad["composite"].idxmin()
+        worst_row = ad.loc[worst_idx]
+
+        catastrophic = ad[ad["sla_compliance"] < 80.0]
+        n_total = len(ad)
+
+        analysis[agent] = {
+            "worst_episode": {
+                "composite": float(worst_row["composite"]),
+                "sla_compliance": float(worst_row["sla_compliance"]),
+                "avg_cost": float(worst_row["avg_cost"]),
+                "max_latency": float(worst_row["max_latency"]),
+                "pattern": str(worst_row["pattern"]),
+                "seed": int(worst_row["seed"]),
+            },
+            "catastrophic_failures": {
+                "count": len(catastrophic),
+                "pct": len(catastrophic) / max(n_total, 1) * 100,
+                "patterns": catastrophic["pattern"].value_counts().to_dict()
+                if len(catastrophic) > 0 else {},
+            },
+            "p5_composite": float(ad["composite"].quantile(0.05)),
+            "p5_sla": float(ad["sla_compliance"].quantile(0.05)),
+            "p95_max_latency": float(ad["max_latency"].quantile(0.95)),
+        }
+
+    return analysis
+
+
+def _print_summary(df: pd.DataFrame, stats: dict, failures: dict, elapsed: float) -> None:
     print("\n" + "=" * 80)
     print("  BENCHMARK RESULTS SUMMARY")
     print("=" * 80)
@@ -329,6 +372,19 @@ def _print_summary(df: pd.DataFrame, stats: dict, elapsed: float) -> None:
             print(f"    ⚠  {ag}: high CV in {list(bad.keys())}")
         else:
             print(f"    ✓  {ag}: stable")
+
+    print("\n  ── FAILURE ANALYSIS (worst-case transparency) ──")
+    for ag, fa in failures.items():
+        worst = fa["worst_episode"]
+        cat = fa["catastrophic_failures"]
+        print(f"    {ag:<20} | Worst: {worst['composite']:.3f} (SLA {worst['sla_compliance']:.1f}%, "
+              f"{worst['pattern']}, seed={worst['seed']})")
+        print(f"    {'':20} | P5 composite: {fa['p5_composite']:.3f} | "
+              f"P5 SLA: {fa['p5_sla']:.1f}% | "
+              f"Catastrophic (<80% SLA): {cat['count']}/{len(df[df['agent']==ag])} "
+              f"({cat['pct']:.1f}%)")
+        if cat["patterns"]:
+            print(f"    {'':20} | Failures on: {dict(cat['patterns'])}")
     print("=" * 80)
 
 

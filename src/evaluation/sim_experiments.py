@@ -34,11 +34,23 @@ from src.safety.safety_filter import ClusterState
 logger = logging.getLogger(__name__)
 
 
-def composite_score(sla_compliance: float, avg_cost: float, baseline_cost: float = 0.65) -> float:
+def composite_score(sla_compliance: float, avg_cost: float, baseline_cost: float = 0.50) -> float:
     """Single balanced score: higher is better.
 
     Combines SLA compliance (0-100%) and cost efficiency into one number.
     Useful for quick comparison: if RL score > HPA score, RL wins overall.
+
+    Parameters
+    ----------
+    sla_compliance : float
+        Percentage of steps within SLA (0-100).
+    avg_cost : float
+        Average hourly cost in $/hr.
+    baseline_cost : float
+        Cost normalization anchor. Default 0.50 is the median of the
+        domain-randomized node price range ($0.20-$0.50). For rigorous
+        benchmarks, callers should pass the empirical HPA median cost
+        so the score is calibrated against the actual baseline.
     """
     sla_score = sla_compliance / 100.0
     cost_efficiency = max(0.0, 1.0 - max(0.0, avg_cost - baseline_cost) / max(baseline_cost, 0.01))

@@ -54,6 +54,14 @@ class NoOpSafetyFilter:
         pass
 
 
+def _load_agent(model_path: str) -> tuple[Any, str]:
+    """Load an agent by model path. Supports 'ensemble' and standard RL models."""
+    if model_path == "ensemble":
+        from src.agents.ensemble_agent import EnsembleMetaAgent
+        return EnsembleMetaAgent(), "rl"
+    return ContainerScaleAgent(model_path=model_path), "rl"
+
+
 def _run_one_episode(env, agent, agent_type, sla_target=200.0):
     """Minimal episode runner returning core metrics."""
     obs, info = env.reset()
@@ -108,8 +116,8 @@ def run_exp_a_ablation(model_path: str, n_episodes: int = 50) -> dict:
     print("=" * 70)
 
     try:
-        agent_safe = ContainerScaleAgent(model_path=model_path)
-        agent_raw = ContainerScaleAgent(model_path=model_path)
+        agent_safe, _ = _load_agent(model_path)
+        agent_raw, _ = _load_agent(model_path)
     except Exception as e:
         print(f"  ⚠ Cannot load model: {e}")
         return {}
@@ -173,7 +181,7 @@ def run_exp_b_adversarial(model_path: str, n_episodes: int = 20) -> dict:
     print("=" * 70)
 
     try:
-        rl_agent = ContainerScaleAgent(model_path=model_path)
+        rl_agent, _ = _load_agent(model_path)
     except Exception as e:
         print(f"  ⚠ Cannot load model: {e}")
         return {}
@@ -252,7 +260,7 @@ def run_exp_c_sensitivity(model_path: str, n_episodes: int = 30) -> dict:
     print("=" * 70)
 
     try:
-        agent = ContainerScaleAgent(model_path=model_path)
+        agent, _ = _load_agent(model_path)
     except Exception as e:
         print(f"  ⚠ Cannot load model: {e}")
         return {}
@@ -325,7 +333,7 @@ def run_exp_d_stability(model_path: str, n_seeds: int = 20) -> dict:
     print("=" * 70)
 
     try:
-        agent = ContainerScaleAgent(model_path=model_path)
+        agent, _ = _load_agent(model_path)
     except Exception as e:
         print(f"  ⚠ Cannot load model: {e}")
         return {}
@@ -365,7 +373,7 @@ def run_exp_e_scalability(model_path: str, n_episodes: int = 10) -> dict:
     print("=" * 70)
 
     try:
-        agent = ContainerScaleAgent(model_path=model_path)
+        agent, _ = _load_agent(model_path)
     except Exception as e:
         print(f"  ⚠ Cannot load model: {e}")
         return {}

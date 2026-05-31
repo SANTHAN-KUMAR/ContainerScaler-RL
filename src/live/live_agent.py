@@ -143,11 +143,28 @@ class LiveClusterAgent:
             except Exception as e:
                 logger.error(f"Error in control loop step {step}: {e}")
 
-            # 5. Sleep
+            # 5. Sleep and poll for live UI updates
             elapsed = time.time() - start_time
             sleep_time = max(0.0, interval_sec - elapsed)
             if sleep_time > 0:
-                time.sleep(sleep_time)
+                end_sleep = time.time() + sleep_time
+                while time.time() < end_sleep:
+                    # Sleep in 2-second chunks and re-log current metrics for the UI
+                    time_to_sleep = min(2.0, end_sleep - time.time())
+                    if time_to_sleep > 0:
+                        time.sleep(time_to_sleep)
+                    try:
+                        fast_obs = self.observer.get_state()
+                        fast_state = ClusterState.from_obs(fast_obs)
+                        self.logger.log(
+                            step=step,
+                            state=fast_state,
+                            proposed_delta=proposed_delta,
+                            safe_delta=safe_delta,
+                            source=source,
+                        )
+                    except Exception:
+                        pass
             else:
                 logger.warning(f"Control loop taking longer than {interval_sec}s!")
 

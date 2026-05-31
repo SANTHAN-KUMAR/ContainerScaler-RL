@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics & Debrief — ContainerScaler</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-brand">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></svg>
+            CONTAINERSCALER
+        </a>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Mission</a>
+            <a href="/live" class="nav-link">Live Control</a>
+            <a href="/simulator" class="nav-link">Simulator</a>
+            <a href="/analytics" class="nav-link active">Analytics</a>
+        </div>
+        <div class="nav-status">
+            <div class="status-dot" id="global-status-dot"></div>
+            <span id="global-status-text">Standby</span>
+        </div>
+    </nav>
+
+    <div class="page-body page-container">
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+                <div class="section-label">Debriefing</div>
+                <h1>Simulation Analytics</h1>
+                <div class="sub">Review past simulation runs and compare agent performance.</div>
+            </div>
+            <button class="btn btn-ghost" onclick="loadSessions()">Refresh Data</button>
+        </div>
+
+        <div class="two-col" style="grid-template-columns: 350px 1fr;">
+            <!-- Left: Session List -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Recent Operations</h3>
+                </div>
+                <div class="session-list" id="session-list">
+                    <div class="empty-state">Loading sessions...</div>
+                </div>
+            </div>
+
+            <!-- Right: Details -->
+            <div class="card" id="detail-panel" style="display: none;">
+                <div class="card-header">
+                    <h3>Operation Details</h3>
+                    <div class="badge badge-amber" id="det-agent">PPO</div>
+                </div>
+                
+                <div class="metric-grid" style="margin-bottom: 1.5rem;">
+                    <div class="metric-card">
+                        <div class="metric-label">SLA Compliance</div>
+                        <div class="metric-value"><span id="det-sla">0</span><span class="unit">%</span></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Avg Cost</div>
+                        <div class="metric-value"><span id="det-cost">0</span><span class="unit">$/hr</span></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Grade</div>
+                        <div class="metric-value amber" id="det-grade">S</div>
+                    </div>
+                </div>
+
+                <div class="section-label">Trajectory Analysis</div>
+                <div class="action-log" id="det-log" style="height: 400px;">
+                    <!-- Logs populated via JS -->
+                </div>
+            </div>
+            
+            <div class="card" id="empty-panel" style="display: flex; align-items: center; justify-content: center;">
+                <div class="empty-state">Select an operation from the list to view details.</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/analytics.js"></script>
+</body>
+</html>

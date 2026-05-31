@@ -1,0 +1,175 @@
+{
+  "Fixed-10": {
+    "worst_episode": {
+      "composite": 0.4962997070146546,
+      "sla_compliance": 1.6666666666666667,
+      "avg_cost": 0.5120336263186788,
+      "max_latency": 540352.0634867054,
+      "pattern": "double_peak",
+      "seed": 2001
+    },
+    "catastrophic_failures": {
+      "count": 90,
+      "pct": 64.28571428571429,
+      "patterns": {
+        "flash_crowd": 20,
+        "gradual_ramp": 20,
+        "double_peak": 20,
+        "sawtooth": 14,
+        "noisy": 11,
+        "diurnal": 5
+      }
+    },
+    "p5_composite": 0.5122916666666666,
+    "p5_sla": 2.4583333333333335,
+    "p95_max_latency": 2977640.463441407
+  },
+  "Fixed-5": {
+    "worst_episode": {
+      "composite": 0.5,
+      "sla_compliance": 0.0,
+      "avg_cost": 0.38903029981192006,
+      "max_latency": 759556.5259518834,
+      "pattern": "steady",
+      "seed": 1001
+    },
+    "catastrophic_failures": {
+      "count": 128,
+      "pct": 91.42857142857143,
+      "patterns": {
+        "diurnal": 20,
+        "flash_crowd": 20,
+        "gradual_ramp": 20,
+        "double_peak": 20,
+        "noisy": 20,
+        "sawtooth": 20,
+        "steady": 8
+      }
+    },
+    "p5_composite": 0.5,
+    "p5_sla": 0.0,
+    "p95_max_latency": 6527271.15704499
+  },
+  "HPA": {
+    "worst_episode": {
+      "composite": 0.4625,
+      "sla_compliance": 92.5,
+      "avg_cost": 1.0664217435923566,
+      "max_latency": 107483.58047410047,
+      "pattern": "noisy",
+      "seed": 2000
+    },
+    "catastrophic_failures": {
+      "count": 0,
+      "pct": 0.0,
+      "patterns": {}
+    },
+    "p5_composite": 0.4809524140510735,
+    "p5_sla": 90.83333333333333,
+    "p95_max_latency": 87132.99039765632
+  },
+  "RL-DQN": {
+    "worst_episode": {
+      "composite": 0.5,
+      "sla_compliance": 0.0,
+      "avg_cost": 0.38903029981192006,
+      "max_latency": 5843309.91711462,
+      "pattern": "diurnal",
+      "seed": 1001
+    },
+    "catastrophic_failures": {
+      "count": 22,
+      "pct": 15.714285714285714,
+      "patterns": {
+        "noisy": 11,
+        "diurnal": 7,
+        "double_peak": 3,
+        "flash_crowd": 1
+      }
+    },
+    "p5_composite": 0.5245975482447663,
+    "p5_sla": 21.375000000000004,
+    "p95_max_latency": 5171973.460506062
+  },
+  "RL-Ensemble": {
+    "worst_episode": {
+      "composite": 0.4457043181835189,
+      "sla_compliance": 71.66666666666667,
+      "avg_cost": 0.9126290151498144,
+      "max_latency": 42211.575844847546,
+      "pattern": "flash_crowd",
+      "seed": 2005
+    },
+    "catastrophic_failures": {
+      "count": 1,
+      "pct": 0.7142857142857143,
+      "patterns": {
+        "flash_crowd": 1
+      }
+    },
+    "p5_composite": 0.5141696352561117,
+    "p5_sla": 89.95833333333333,
+    "p95_max_latency": 93815.69731868121
+  },
+  "RL-PPO": {
+    "worst_episode": {
+      "composite": 0.4625,
+      "sla_compliance": 92.5,
+      "avg_cost": 1.4528433787416168,
+      "max_latency": 114000.89756180234,
+      "pattern": "noisy",
+      "seed": 2001
+    },
+    "catastrophic_failures": {
+      "count": 0,
+      "pct": 0.0,
+      "patterns": {}
+    },
+    "p5_composite": 0.475,
+    "p5_sla": 94.16666666666667,
+    "p95_max_latency": 69693.49056763391
+  },
+  "RL-QRDQN": {
+    "worst_episode": {
+      "composite": 0.44224826569232323,
+      "sla_compliance": 87.5,
+      "avg_cost": 0.9952517343076768,
+      "max_latency": 26861.830116707777,
+      "pattern": "flash_crowd",
+      "seed": 2008
+    },
+    "catastrophic_failures": {
+      "count": 9,
+      "pct": 6.428571428571428,
+      "patterns": {
+        "diurnal": 5,
+        "double_peak": 3,
+        "flash_crowd": 1
+      }
+    },
+    "p5_composite": 0.5047832080843206,
+    "p5_sla": 70.75000000000001,
+    "p95_max_latency": 329702.2432482834
+  },
+  "Reactive": {
+    "worst_episode": {
+      "composite": 0.415775645280837,
+      "sla_compliance": 63.33333333333333,
+      "avg_cost": 0.9008910213858297,
+      "max_latency": 43861.88898358022,
+      "pattern": "flash_crowd",
+      "seed": 2005
+    },
+    "catastrophic_failures": {
+      "count": 13,
+      "pct": 9.285714285714286,
+      "patterns": {
+        "noisy": 12,
+        "flash_crowd": 1
+      }
+    },
+    "p5_composite": 0.545870826839057,
+    "p5_sla": 77.41666666666667,
+    "p95_max_latency": 213480.49422060457
+  }
+}

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContainerScaler — Mission Control</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-brand">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></svg>
+            CONTAINERSCALER
+        </a>
+        <div class="nav-links">
+            <a href="/" class="nav-link active">Mission</a>
+            <a href="/live" class="nav-link">Live Control</a>
+            <a href="/simulator" class="nav-link">Simulator</a>
+            <a href="/analytics" class="nav-link">Analytics</a>
+        </div>
+        <div class="nav-status">
+            <div class="status-dot" id="global-status-dot"></div>
+            <span id="global-status-text">Standby</span>
+        </div>
+    </nav>
+
+    <div class="page-body">
+        <header class="hero">
+            <div class="hero-eyebrow">Project ContainerScaler-RL</div>
+            <h1 class="hero-title flicker">Scaling the <span class="highlight">Future</span></h1>
+            <p class="hero-sub">
+                Traditional auto-scalers like Kubernetes HPA react too late and scale too linearly. 
+                We trained a Reinforcement Learning agent (RecurrentPPO) to anticipate traffic storms, 
+                understand cold-start delays, and balance SLA compliance with infrastructure cost.
+            </p>
+            <div class="hero-actions">
+                <a href="/simulator" class="btn btn-amber btn-lg">Enter Simulator</a>
+                <a href="/live" class="btn btn-ghost btn-lg">Live Command Center</a>
+            </div>
+        </header>
+
+        <section class="story-section">
+            <div class="section-label">01 / The Problem</div>
+            <div class="story-grid">
+                <div>
+                    <h2>The Reactive Trap</h2>
+                    <p class="muted" style="margin-top: 1rem; line-height: 1.6;">
+                        Standard Horizontal Pod Autoscalers (HPA) rely on CPU thresholds. By the time 
+                        CPU hits 80%, traffic has already spiked. Compounded by pod cold-start delays, 
+                        the cluster drops requests while waiting for new instances to boot. 
+                    </p>
+                    <p class="muted" style="margin-top: 1rem; line-height: 1.6;">
+                        To compensate, engineers over-provision resources, wasting massive amounts of money.
+                    </p>
+                </div>
+                <div class="card">
+                    <table class="compare-table">
+                        <thead>
+                            <tr>
+                                <th>Feature</th>
+                                <th>Standard HPA</th>
+                                <th>RL Agent</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Decision Logic</td>
+                                <td class="muted">Reactive (CPU > 80%)</td>
+                                <td class="amber">Proactive (Predictive)</td>
+                            </tr>
+                            <tr>
+                                <td>Cold-Start Aware</td>
+                                <td class="bad">No</td>
+                                <td class="good">Yes</td>
+                            </tr>
+                            <tr>
+                                <td>Multi-Objective</td>
+                                <td class="bad">No (SLA only)</td>
+                                <td class="good">Yes (SLA + Cost)</td>
+                            </tr>
+                            <tr>
+                                <td>Adaptability</td>
+                                <td class="muted">Static config</td>
+                                <td class="amber">Learns workload patterns</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="story-section">
+            <div class="section-label">02 / The Solution</div>
+            <div class="story-grid">
+                <div class="card" style="display: flex; align-items: center; justify-content: center; min-height: 200px;">
+                    <div style="text-align: center;">
+                        <div class="amber" style="font-family: var(--font-mono); font-size: 3rem; font-weight: 700; line-height: 1;">120</div>
+                        <div class="label" style="margin-top: 8px;">Step Trajectory</div>
+                        <div class="muted" style="font-size: 13px; margin-top: 8px;">Agent plans ahead for 1-hour episodes</div>
+                    </div>
+                </div>
+                <div>
+                    <h2>Deep Reinforcement Learning</h2>
+                    <p class="muted" style="margin-top: 1rem; line-height: 1.6;">
+                        Our RecurrentPPO agent observes a 23-dimensional state vector — including traffic 
+                        acceleration, pending pods, and queue depth. It outputs replica deltas (-3 to +3) 
+                        to continuously optimize a reward function balancing latency and node cost.
+                    </p>
+                    <a href="/simulator" class="btn btn-ghost" style="margin-top: 1.5rem;">See it in action &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
