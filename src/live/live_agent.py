@@ -63,19 +63,23 @@ class LiveClusterAgent:
                 namespace=namespace, deployment=deployment
             )
         
-        # Load the agent (if model not found, fallback to HPA will be handled in Agent)
+        # Load the agent. Passing model_path="ensemble" loads the EnsembleMetaAgent.
         try:
-            self.agent = ContainerScaleAgent(model_path=model_path)
+            m_path = str(model_path).lower()
+            if m_path == "hpa":
+                logger.info("HPA Baseline selected. Bypassing RL model.")
+                raise Exception("Forced HPA")
+            elif m_path == "ensemble":
+                from src.agents.ensemble_agent import EnsembleMetaAgent
+                self.agent = EnsembleMetaAgent()
+                logger.info("Loaded EnsembleMetaAgent as live controller.")
+            else:
+                self.agent = ContainerScaleAgent(model_path=model_path)
             self.has_rl = True
         except Exception as e:
-            logger.error(f"Failed to load RL model: {e}. Will run in HPA-only mode.")
-            # Create agent with dummy path; it will fail to load, 
-            # and decide_with_info() will naturally fallback to HPA.
-            # But here we'll just instantiate without RL if file is missing
+            logger.error("Failed to load RL model: %s. Running in HPA-only mode.", e)
             self.agent = None
             self.has_rl = False
-            
-            # Need a fallback standalone agent if we want pure HPA mode
             from src.agents.hpa_baseline import RealisticHPA
             from src.safety.safety_filter import SafetyFilter
             self.hpa = RealisticHPA()
@@ -176,9 +180,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--prom", default="http://localhost:9090", help="Prometheus URL")
     parser.add_argument("--namespace", default="default", help="K8s namespace")
-    parser.add_argument("--deployment", default="podinfo", help="Target deployment")
-    parser.add_argument("--model", default="ppo_autoscaler", help="Path to RL model")
-    parser.add_argument("--steps", type=int, default=120, help="Number of steps (30s each)")
+    parser.add_argument("--deployment", default="frontend", help="Target deployment (Online Boutique frontend)")
+    parser.add_argument("--model", default="ensemble", help="Model path or 'ensemble' for EnsembleMetaAgent")
+    parser.add_argument("--steps", type=int, default=120, help="Number of steps")
+    parser.add_argument("--interval", type=int, default=30, help="Interval between steps in seconds")
     parser.add_argument("--name", default="live_run", help="Run name prefix for logs")
     
     args = parser.parse_args()
@@ -190,7 +195,7 @@ def main() -> None:
         model_path=args.model,
         run_name=args.name,
     )
-    agent.run_loop(duration_steps=args.steps)
+    agent.run_loop(duration_steps=args.steps, interval_sec=args.interval)
 
 
 if __name__ == "__main__":

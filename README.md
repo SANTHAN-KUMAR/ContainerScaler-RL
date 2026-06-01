@@ -1,25 +1,29 @@
 # ContainerScale-RL
 
-ContainerScale-RL is an autonomous Reinforcement Learning-based autoscaler for Kubernetes. It is designed to replace the standard Horizontal Pod Autoscaler (HPA) by learning complex, non-linear traffic patterns (such as cold-start latency spikes, queue dynamics, and diurnal patterns) using a two-phase simulation-to-real architecture.
+ContainerScale-RL is an autonomous Reinforcement Learning-based autoscaler for Kubernetes. It replaces the standard Horizontal Pod Autoscaler (HPA) by learning complex, non-linear traffic patterns (cold-start latency spikes, queue dynamics, diurnal patterns) using a two-phase simulation-to-real architecture.
+
+The live deployment now targets **Google's Online Boutique** microservices demo running on a local k3s cluster, replacing the previous `podinfo` test app.
 
 ## Architecture Overview
 
 The system operates in two distinct phases:
 
 1.  **Phase 1: Simulation & Training (Offline)**
-    *   **Simulator:** A custom Gymnasium environment (`K8sSimEnv`) that models Kubernetes queue dynamics, cold-start latency, and CPU/Memory utilization using Little's Law. It runs at 1000+ steps/second.
-    *   **Agent:** A `RecurrentPPO` agent (from `sb3-contrib`) equipped with LSTM memory to anticipate traffic patterns and handle partial observability.
-    *   **Safety Filter:** A pure-Python layer that enforces hard invariants (e.g., minimum/maximum replicas, no scale-down during latency spikes).
+    *   **Simulator:** A custom Gymnasium environment (`K8sSimEnv`) that models Kubernetes queue dynamics, cold-start latency, and CPU/Memory utilization using Little's Law. Runs at 1000+ steps/second.
+    *   **Agent:** A `RecurrentPPO` agent (from `sb3-contrib`) with LSTM memory to anticipate traffic patterns, plus a `QR-DQN` alternative with frame stacking. An `EnsembleMetaAgent` combines both.
+    *   **Safety Filter:** A pure-Python layer enforcing hard invariants (min/max replicas, no scale-down during latency spikes).
 
 2.  **Phase 2: Live Cluster Deployment (Online)**
-    *   **Observer:** A bridge (`PrometheusObserver`) that pulls live metrics from the Kubernetes cluster (via Prometheus) and normalizes them into the exact 22-dimensional observation vector used during simulation.
-    *   **Executor:** A Python script (`LiveClusterAgent`) that runs every 30 seconds, queries the RL agent for a scaling decision, passes it through the safety filter, and patches the Kubernetes Deployment API.
-    *   **Fallback:** If the RL model fails or encounters a critical error, the agent instantly falls back to a deterministic `RealisticHPA` formula to guarantee SLA compliance.
+    *   **Target App:** [Online Boutique](https://github.com/GoogleCloudPlatform/microservices-demo) — a realistic 11-service e-commerce app. The RL agent scales the `frontend` deployment.
+    *   **Observer:** `PrometheusObserver` pulls live metrics via Prometheus (Traefik ingress metrics for HTTP traffic) and normalizes them into the exact 23-dimensional observation vector used during training.
+    *   **Executor:** `K8sPatchExecutor` uses `kubectl scale` (bypasses Python TLS issues with local k3s) to apply replica changes every 5–30 seconds.
+    *   **Fallback:** Any RL failure instantly falls back to `RealisticHPA` to guarantee SLA compliance.
+    *   **Dashboard:** A Flask-based Live Command Center with real-time metrics, an embedded Online Boutique iframe (via reverse proxy), and one-click agent/traffic controls.
 
 ## Quickstart
 
 ### Local Setup
-Ensure you have Python 3.10+ installed.
+Requires Python 3.10+ and a running k3s cluster.
 
 ```bash
 # Clone the repository
@@ -35,44 +39,71 @@ pip install -e .[dev,loadtest]
 ### Phase 1: Train the RL Agent in Simulation
 
 ```bash
-# Train the RecurrentPPO model (will save to ppo_autoscaler.zip)
+# Train the RecurrentPPO model (saves to ppo_autoscaler.zip)
 crl-train --config configs/training_config.yaml
+
+# Or train QR-DQN
+python -m src.training.train_dqn --config configs/dqn_training_config.yaml
 ```
 
 ### Phase 2: Live Cluster Setup & Deployment
 
-We provide a lightweight setup for local testing using `k3s`.
-
 ```bash
-# Setup local k3s cluster, deploy Prometheus, and the podinfo target app
-chmod +x deploy/k3s-setup.sh
-sudo ./deploy/k3s-setup.sh
+# Deploy Online Boutique + Prometheus to your k3s cluster
+kubectl apply -f deploy/online-boutique.yaml
+kubectl apply -f deploy/prometheus.yaml
 
-# Run the live RL agent
-crl-live --prom http://localhost:30090 --namespace default --deployment podinfo --model ppo_autoscaler
+# Run the live RL agent (defaults to EnsembleMetaAgent on the frontend deployment)
+crl-live --prom http://localhost:30090 --namespace default --deployment frontend --model ensemble
+
+# Or launch the full dashboard (recommended)
+python -m src.dashboard.app
+# Open http://localhost:5000
 ```
 
 ### Phase 3: Evaluate Performance
 
 ```bash
-# Generate synthetic load using Locust to test the agent's scaling behavior
-locust -f deploy/locustfile.py --headless -u 100 -r 10 --run-time 1h --host http://<podinfo-svc-ip>:9898
+# Generate realistic e-commerce load (flash-crowd profile)
+TRAFFIC_PROFILE=flash locust -f deploy/locustfile.py --headless -u 200 -r 30 --run-time 10m --host http://127.0.0.1:80
 
 # Run simulation baseline experiment (RL vs HPA)
 python -m src.evaluation.sim_experiments --exp 1
+
+# Run generalization test on held-out patterns
+python -m src.evaluation.sim_experiments --exp 9 --model ppo_autoscaler --episodes 50
 ```
 
 ## Directory Structure
 
 *   `configs/`: YAML configurations for the simulator and training loops.
-*   `deploy/`: Kubernetes manifests (podinfo, prometheus), k3s setup, and Locust load testing shapes.
-*   `src/agents/`: RL Agent inference wrapper and Realistic HPA baseline.
+*   `deploy/`: Kubernetes manifests (`online-boutique.yaml`, `prometheus.yaml`), k3s networking fix, and Locust load-testing shapes.
+*   `src/agents/`: RL agent inference wrapper, HPA baseline, and `EnsembleMetaAgent`.
 *   `src/env/`: Gymnasium K8s Simulator and Synthetic Workload Generators.
 *   `src/evaluation/`: Metric calculations, experiment runners, and plotting utilities.
-*   `src/live/`: Prometheus observer, Kubernetes executor, and the live agent control loop.
+*   `src/live/`: Prometheus observer (Traefik-aware), kubectl-based executor, and the live agent control loop.
 *   `src/models/`: PyTorch World Models (Structured, Flat, Ensemble) for Research Experiment 3.
 *   `src/safety/`: Hard-coded invariant rules for the safety filter.
-*   `src/training/`: RecurrentPPO orchestrator script.
+*   `src/training/`: RecurrentPPO and QR-DQN training scripts with alpha-schedule callback.
+*   `src/dashboard/`: Flask Live Command Center with real-time metrics and boutique proxy.
+
+## Live Dashboard
+
+The dashboard (`src/dashboard/app.py`) provides a full Live Command Center:
+
+- **Real-time metrics** — RPS, P99 latency, CPU, replicas, agent decisions (reads directly from Prometheus when the agent is idle)
+- **Online Boutique iframe** — embedded via Flask reverse proxy at `/boutique/`, auto-shows when the NodePort is live
+- **Traffic profiles** — select `steady`, `flash`, `diurnal`, `ddos`, or `step` before injecting load
+- **Model selector** — choose `ensemble`, `ppo_autoscaler`, `qr_dqn`, or `hpa` before deploying the agent
+- **NodePort connectivity** — no port-forwards needed; Prometheus (`:30090`) and Boutique (`:30808`) are accessed directly
 
 ## Experiments
-The project includes a suite of 8 experiments (7 sim, 1 live) to validate performance. See `src/evaluation/sim_experiments.py` for implementation details.
+
+The project includes 9 experiments (8 sim, 1 live) to validate performance. See `src/evaluation/sim_experiments.py` for details.
+
+| Exp | Description |
+|-----|-------------|
+| 1   | RL vs HPA across all 5 training patterns |
+| 2–7 | Ablation studies (safety filter, reward shaping, LSTM, etc.) |
+| 8   | Live sim-to-real gap analysis |
+| 9   | Generalization on held-out patterns (`double_peak`, `sawtooth`) |

@@ -2,7 +2,7 @@
 
 This document tracks the current state of the repository against the original `PROJECT_PROPOSAL.md` and documents all recent changes.
 
-**Last updated:** May 29, 2026
+**Last updated:** June 2, 2026
 
 ---
 
@@ -15,6 +15,68 @@ Every component from the original proposal is fully implemented. Recent work has
 ---
 
 ## Recent Changes (Latest Commits)
+
+### Live Target: podinfo → Online Boutique
+- **Files changed:** `src/live/observer.py`, `src/live/live_agent.py`, `src/live/executor.py`, `deploy/locustfile.py`, `src/dashboard/app.py`
+- Migrated the live deployment target from the simple `podinfo` Go app to **Google's Online Boutique** (`frontend` deployment)
+- Online Boutique is a realistic 11-service e-commerce demo — provides meaningful HTTP traffic patterns (browse, cart, checkout)
+- HTTP metrics now sourced from **Traefik ingress** (`traefik_service_requests_total`, `traefik_service_request_duration_seconds_bucket`) since the boutique frontend doesn't natively expose Prometheus metrics
+- CPU normalisation updated: per-pod limit changed from `250m` → `100m` (boutique frontend resource profile)
+- Memory normalisation updated: per-pod limit changed from `512Mi` → `128Mi`
+- Default deployment arg changed from `podinfo` → `frontend` across all entry points
+
+### Executor: Python K8s API → kubectl
+- **Files changed:** `src/live/executor.py`
+- Replaced `apps_v1.patch_namespaced_deployment_scale()` with `subprocess.check_call(["kubectl", "scale", ...])` to bypass Python TLS authentication issues with local k3s self-signed certificates
+- Same approach applied in `observer.py` for fetching replica counts
+
+### EnsembleMetaAgent as Default Live Controller
+- **Files changed:** `src/live/live_agent.py`
+- `--model` default changed from `ppo_autoscaler` → `ensemble`
+- `live_agent.py` now explicitly routes `model="ensemble"` to load `EnsembleMetaAgent` and `model="hpa"` to force HPA-only mode (bypasses RL entirely)
+- Added `--interval` CLI argument (default `30`s) to control the step interval independently of `--steps`
+
+### Dashboard: NodePort-First Architecture
+- **Files changed:** `src/dashboard/app.py`, `src/dashboard/static/app.js`, `src/dashboard/static/live.js`, `src/dashboard/templates/live.html`
+- Removed port-forward processes (`port_forward_prom`, `port_forward_podinfo`) — replaced with direct NodePort access
+  - Prometheus: `http://127.0.0.1:30090`
+  - Online Boutique: `http://127.0.0.1:30808`
+- Added `_check_nodeport()` helper for TCP-level connectivity checks (treats timeout as "alive" to avoid false alarms under DDOS load)
+- **Live metrics without agent:** When the RL agent is not running, `/api/live_metrics` now fetches metrics directly from Prometheus via a `PrometheusObserver` instance — the dashboard stays "Live" permanently
+- **Boutique reverse proxy:** New `/boutique/<path>` route proxies the Online Boutique through Flask (same origin), bypassing browser cross-origin iframe restrictions. Rewrites `href`, `src`, and `action` attributes to keep navigation within the proxy.
+- **Boutique iframe panel:** Live Command Center now embeds the boutique storefront in a side panel. Auto-shows when NodePort is detected live; user can toggle visibility.
+- **Configurable start parameters:** `toggleService()` in `app.js` now sends a JSON payload when starting services — `traffic_profile` for Locust, `model` for the live agent. UI dropdowns drive these values.
+- Live agent now started with `--steps 720 --interval 5` (was `--steps 120` with no interval flag)
+- Locust now targets `http://127.0.0.1:80` (Traefik ingress) with `200` users / `30` spawn rate (was `9898` port, `100` users)
+
+### Locust: Realistic E-Commerce User Journeys
+- **Files changed:** `deploy/locustfile.py`
+- Completely rewrote from a single `GET /delay/1` task to a full `BoutiqueShopperUser` with weighted tasks:
+  - `view_homepage` (weight 5), `view_product` (weight 2), `add_to_cart_and_view` (weight 2), `checkout` (weight 1)
+  - Think-time: `between(0.5, 2.0)` seconds
+- Added 4 traffic shape profiles selectable via `TRAFFIC_PROFILE` env var:
+  - `flash` — ramp 20→200 users, sustain, cool-down (mirrors `K8sSimEnv` flash_crowd scenario)
+  - `diurnal` — 1-hour sine wave (125 ± 75 users)
+  - `ddos` — instant spike to 500 users
+  - `step` — 50→100→150→200 users in 60s increments
+  - `steady` (default) — constant load via CLI `--users` flag
+
+### Prometheus: Enhanced Pod Scrape Config
+- **Files changed:** `deploy/prometheus.yaml`
+- Added relabelling rules to the pod scrape config:
+  - Honour `prometheus.io/port` annotation for per-pod port override
+  - Honour `prometheus.io/path` annotation for custom metrics paths
+  - Preserve `app` and `pod` labels for PromQL filtering
+
+### Observer: TLS + Traefik Fixes
+- **Files changed:** `src/live/observer.py`
+- Disabled SSL verification (`verify_ssl = False`) and suppressed `urllib3` InsecureRequestWarning for local k3s self-signed certs
+- PromQL queries updated to use Traefik ingress metrics instead of app-level `http_requests_total`
+- Replica count now fetched via `kubectl get deploy` subprocess (same TLS bypass as executor)
+- Container name matching updated: looks for `"server"` or the deployment name (boutique frontend container is named `"server"`)
+- Added `Gi` memory unit parsing
+
+---
 
 ### Observation Space: 22 → 23 Dimensions
 - **Files changed:** `src/env/k8s_sim.py`, `src/live/observer.py`, `src/safety/safety_filter.py`
@@ -122,11 +184,14 @@ Every component from the original proposal is fully implemented. Recent work has
 - Not part of the agent's decision path
 
 ### 6. Phase 2: Live Cluster Deployment
-**Status: Fully Implemented**
-- **Infrastructure:** `deploy/k3s-setup.sh`, `deploy/podinfo.yaml`, `deploy/prometheus.yaml`, `deploy/locustfile.py`
+**Status: Fully Implemented — Migrated to Online Boutique**
+- **Infrastructure:** `deploy/k3s-setup.sh`, `deploy/online-boutique.yaml`, `deploy/prometheus.yaml`, `deploy/locustfile.py`
 - **Live Agent:** `src/live/observer.py`, `src/live/executor.py`, `src/live/live_agent.py`, `src/live/metrics_logger.py`
-- `PrometheusObserver` updated to produce 23-dim observation vector including traffic acceleration
-- Control loop: 30-second interval, Prometheus → PPO/QR-DQN → SafetyFilter → Kubernetes API
+- Target deployment migrated from `podinfo` → Online Boutique `frontend`
+- `PrometheusObserver` updated: Traefik ingress metrics, kubectl-based replica fetch, TLS bypass for k3s
+- `K8sPatchExecutor` updated: uses `kubectl scale` subprocess instead of Python K8s API (TLS fix)
+- `LiveClusterAgent` updated: explicit `ensemble`/`hpa`/`<path>` routing, configurable `--interval` flag
+- Control loop: configurable interval (default 5s for dashboard, 30s for CLI), Prometheus → EnsembleMetaAgent → SafetyFilter → kubectl
 
 ### 7. Evaluation Pipeline
 **Status: Fully Implemented — Expanded**
@@ -140,11 +205,13 @@ Every component from the original proposal is fully implemented. Recent work has
 ---
 
 ## Bonus Feature: Live Management Dashboard
-**Status: Fully Implemented (Exceeds Proposal)**
-- **Files:** `src/dashboard/app.py`, `src/dashboard/templates/index.html`, `src/dashboard/static/`
-- Flask dashboard with real-time CSV log parsing
-- One-click port-forwarding, traffic generation, and evaluation
-- Live system state board: RPS, Latency, CPU, Replicas, Agent Decisions
+**Status: Fully Implemented — Major Overhaul (Exceeds Proposal)**
+- **Files:** `src/dashboard/app.py`, `src/dashboard/templates/`, `src/dashboard/static/`
+- NodePort-first architecture — no port-forward processes required
+- Live metrics fetched directly from Prometheus when agent is idle (always-on dashboard)
+- Embedded Online Boutique storefront via Flask reverse proxy (`/boutique/`)
+- Configurable traffic profiles (steady/flash/diurnal/ddos/step) and model selector (ensemble/ppo/qr-dqn/hpa)
+- Real-time pod grid, SLA breach indicator, agent decision log
 
 ---
 
@@ -177,6 +244,16 @@ python -m src.evaluation.sim_experiments --exp 9 --model ppo_autoscaler --episod
 # Run Experiment 8 (Live/Sim RL vs HPA comparison)
 python -m src.evaluation.live_experiment --mode sim --workload diurnal
 
-# Deploy live agent
-crl-live --prom http://localhost:30090 --namespace default --deployment podinfo --model ppo_autoscaler
+# Deploy live agent (EnsembleMetaAgent on Online Boutique frontend)
+crl-live --prom http://localhost:30090 --namespace default --deployment frontend --model ensemble
+
+# Deploy live agent (HPA-only mode)
+crl-live --prom http://localhost:30090 --namespace default --deployment frontend --model hpa
+
+# Launch the full dashboard
+python -m src.dashboard.app
+# Open http://localhost:5000
+
+# Inject flash-crowd traffic via Locust
+TRAFFIC_PROFILE=flash locust -f deploy/locustfile.py --headless -u 200 -r 30 --run-time 10m --host http://127.0.0.1:80
 ```

@@ -72,8 +72,27 @@ async function toggleService(service) {
     const isRunning = currentStatus[service];
     const endpoint = isRunning ? `/api/stop/${service}` : `/api/start/${service}`;
     
+    let options = { method: 'POST' };
+    
+    // Inject parameters from UI if we are starting a service
+    if (!isRunning) {
+        let payload = {};
+        if (service === 'locust') {
+            const profile = document.getElementById('trafficProfile');
+            if (profile) payload.traffic_profile = profile.value;
+        } else if (service === 'live_agent') {
+            const model = document.getElementById('agentModel');
+            if (model) payload.model = model.value;
+        }
+        
+        if (Object.keys(payload).length > 0) {
+            options.headers = { 'Content-Type': 'application/json' };
+            options.body = JSON.stringify(payload);
+        }
+    }
+    
     try {
-        let res = await fetch(endpoint, { method: 'POST' });
+        let res = await fetch(endpoint, options);
         if (!res.ok) {
             let data = await res.json();
             throw new Error(data.error);

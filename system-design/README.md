@@ -77,11 +77,11 @@ The system has two completely independent phases joined by a single artifact —
 │  PHASE 2: LIVE CLUSTER DEPLOYMENT                                │
 │                                                                  │
 │  Locust ──► k3s Cluster ──► Prometheus ──► PrometheusObserver   │
-│  (traffic)   (podinfo app)   (metrics)      (22-dim vector)      │
+│  (traffic)  (Online Boutique) (Traefik+pods) (23-dim vector)     │
 │                                                    │             │
 │                                                    ▼             │
-│                                          ContainerScaleAgent     │
-│                                          (RecurrentPPO inference)│
+│                                          EnsembleMetaAgent       │
+│                                          (PPO + QR-DQN ensemble) │
 │                                                    │             │
 │                                                    ▼             │
 │                                            SafetyFilter          │
@@ -92,7 +92,7 @@ The system has two completely independent phases joined by a single artifact —
 │                                          │                  HPA  │
 │                                          ▼                       │
 │                                  K8sPatchExecutor                │
-│                                  (Kubernetes API)                │
+│                                  (kubectl scale)                 │
 │                                          │                       │
 │                                          ▼                       │
 │                              replica count changes ──────────────┤
@@ -125,18 +125,18 @@ The agent trains entirely in a synthetic environment. No real cluster is involve
 
 ### Phase 2: Live Cluster Deployment
 
-The trained model is loaded and run against a real k3s cluster. The agent makes one decision every 30 seconds — the same interval it was trained on.
+The trained model is loaded and run against a real k3s cluster. The agent makes one decision every 5–30 seconds (configurable via `--interval`).
 
 **What's real in Phase 2:**
 - The cluster (k3s running locally)
-- The application (podinfo — a real Go service)
-- The traffic (Locust generating HTTP requests)
-- The metrics (Prometheus scraping real pod metrics)
-- The scaling actions (Kubernetes API patching real deployments)
+- The application (Online Boutique `frontend` — a real Go service in an 11-service microservices demo)
+- The traffic (Locust generating realistic e-commerce user journeys via Traefik ingress)
+- The metrics (Prometheus scraping Traefik ingress metrics + Kubernetes metrics API)
+- The scaling actions (`kubectl scale` patching the `frontend` deployment)
 
 **What carries over from Phase 1:**
 - The trained model weights (frozen — no further learning)
-- The 22-dimensional observation format (must match exactly)
+- The 23-dimensional observation format (must match exactly)
 - The action space (replica delta -3 to +3)
 - The safety filter rules
 
@@ -157,7 +157,7 @@ The trained model is loaded and run against a real k3s cluster. The agent makes 
 | Component | File | Role |
 |---|---|---|
 | LiveClusterAgent | `src/live/live_agent.py` | Top-level control loop coordinator |
-| PrometheusObserver | `src/live/observer.py` | Queries Prometheus → builds 22-dim vector |
+| PrometheusObserver | `src/live/observer.py` | Queries Prometheus (Traefik) → builds 23-dim vector |
 | ContainerScaleAgent | `src/agents/agent.py` | Loads model, runs inference, manages LSTM state |
 | SafetyFilter | `src/safety/safety_filter.py` | Hard-coded invariant rules on every action |
 | RealisticHPA | `src/agents/hpa_baseline.py` | Comparison baseline + RL fallback controller |
@@ -204,19 +204,21 @@ ppo_autoscaler.zip
 ### Phase 2 Data Flow (Live)
 
 ```
-Locust → HTTP requests → podinfo (k3s)
+Locust → HTTP requests → Online Boutique frontend (k3s, via Traefik ingress)
                               │
                               │ metrics scraped every 15s
                               ▼
                          Prometheus
+                         (Traefik ingress metrics + K8s metrics API)
                               │
-                              │ PromQL queries
+                              │ PromQL queries (Traefik service metrics)
                               ▼
                     PrometheusObserver
                               │
-                              │ obs[22] (normalized, same format as simulator)
+                              │ obs[23] (normalized, same format as simulator)
                               ▼
-                    ContainerScaleAgent
+                    EnsembleMetaAgent
+                    (ContainerScaleAgent: PPO + QR-DQN)
                               │
                               │ LSTM hidden state maintained across steps
                               │ Neural network inference
@@ -236,9 +238,9 @@ Locust → HTTP requests → podinfo (k3s)
                               ▼
                     K8sPatchExecutor
                               │
-                              │ Kubernetes API patch
+                              │ kubectl scale deployment frontend
                               ▼
-                    podinfo deployment
+                    frontend deployment
                     (replica count changes)
                               │
                               └──────────────────────► back to Prometheus
@@ -249,22 +251,24 @@ Locust → HTTP requests → podinfo (k3s)
 
 ## 7. The Sim-to-Real Bridge
 
-The 22-dimensional observation vector is the contract between Phase 1 and Phase 2. Every feature the simulator produces must be reproducible from real Prometheus metrics.
+The 23-dimensional observation vector is the contract between Phase 1 and Phase 2. Every feature the simulator produces must be reproducible from real Prometheus metrics.
 
-| Observation Feature | Simulator Source | Prometheus Source |
+| Observation Feature | Simulator Source | Live Source |
 |---|---|---|
-| cpu_util | Computed from formula | `rate(container_cpu_usage_seconds_total[1m])` |
-| mem_util | Computed from formula | `container_memory_working_set_bytes` |
-| replicas | Internal counter | `kube_deployment_status_replicas` |
+| cpu_util | Computed from formula | Kubernetes metrics API (`container_cpu_usage`) — normalised by 100m/pod |
+| mem_util | Computed from formula | Kubernetes metrics API (`container_memory`) — normalised by 128Mi/pod |
+| replicas | Internal counter | `kubectl get deploy frontend` (subprocess) |
 | pending_pods | Pending list length | `total_replicas - ready_replicas` |
-| request_rate | WorkloadGenerator | `rate(http_requests_total[1m])` |
-| p99_latency | Queue model formula | `histogram_quantile(0.99, ...)` |
-| queue_depth | Exact internal value | Estimated from latency overshoot |
+| request_rate | WorkloadGenerator | `rate(traefik_service_requests_total{service=~"default-frontend.*"}[20s])` |
+| p99_latency | Queue model formula | `histogram_quantile(0.99, rate(traefik_service_request_duration_seconds_bucket[20s]))` |
+| queue_depth | Exact internal value | Estimated from latency overshoot × request rate |
+| traffic_accel | 2nd derivative of RPS | Computed from rolling history in `PrometheusObserver` |
 
 **Known gaps:**
 - Prometheus metrics lag by up to 60 seconds (rate windows)
 - Queue depth is estimated in live deployment, exact in simulation
 - Real pod startup times differ from simulator's LogNormal model
+- Traefik metrics cover ingress traffic only — internal service-to-service calls not visible
 
 These gaps are documented and measured in Experiment 8 (sim-to-real gap analysis).
 

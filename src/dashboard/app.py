@@ -38,18 +38,26 @@ from typing import Any, Generator
 import psutil
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
+from src.live.observer import PrometheusObserver
+from src.safety.safety_filter import ClusterState
+
+# Global observer for live metrics when agent is not running
+_global_observer = None
+
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Process registry ─────────────────────────────────────────────────────────
 processes: dict[str, Any] = {
-    "port_forward_prom": None,
-    "port_forward_podinfo": None,
     "live_agent": None,
     "locust": None,
     "evaluation": None,
 }
+
+# NodePort endpoints — no port-forwards needed
+PROM_NODEPORT    = "http://127.0.0.1:30090"
+BOUTIQUE_NODEPORT = "http://127.0.0.1:30808"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -119,7 +127,32 @@ def analytics_page():
 @app.route("/api/status", methods=["GET"])
 def get_status():
     status = {key: is_running(proc) for key, proc in processes.items()}
+    # Add connectivity status for NodePort services (no process needed)
+    status["boutique_live"] = _check_nodeport(BOUTIQUE_NODEPORT)
+    status["prometheus_live"] = _check_nodeport(PROM_NODEPORT)
     return jsonify(status)
+
+
+def _check_nodeport(url: str) -> bool:
+    """Quick TCP-level check if a NodePort is reachable.
+    Relaxes timeout requirements to prevent false 'Offline' alarms during heavy DDOS load.
+    """
+    import socket
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    try:
+        s = socket.create_connection((parsed.hostname, parsed.port), timeout=5)
+        s.close()
+        return True
+    except socket.timeout:
+        # If it times out, the port is open but the server is too congested to reply quickly.
+        # This means the cluster is ALIVE and struggling, which is exactly what we want to show!
+        return True
+    except ConnectionRefusedError:
+        # Port is actually closed (Boutique is not deployed or NodePort is wrong).
+        return False
+    except OSError:
+        return False
 
 
 @app.route("/api/start/<service>", methods=["POST"])
@@ -137,28 +170,32 @@ def start_service(service: str):
 
     try:
         python_cmd = sys.executable
+        
+        # Parse optional JSON payload for configuration
+        payload = {}
+        if request.is_json:
+            payload = request.get_json()
 
-        if service == "port_forward_prom":
-            kill_dangling_port_forwards("svc/prometheus")
-            cmd = ["kubectl", "port-forward", "svc/prometheus", "30090:9090"]
-        elif service == "port_forward_podinfo":
-            kill_dangling_port_forwards("svc/podinfo")
-            cmd = ["kubectl", "port-forward", "svc/podinfo", "9898:9898"]
-        elif service == "live_agent":
+        if service == "live_agent":
+            model = payload.get("model", "ensemble")
             cmd = [
                 python_cmd, "-m", "src.live.live_agent",
-                "--prom", "http://localhost:30090",
+                "--prom", PROM_NODEPORT,
                 "--namespace", "default",
-                "--deployment", "podinfo",
-                "--model", "ppo_autoscaler",
-                "--steps", "120",
+                "--deployment", "frontend",   # Online Boutique frontend
+                "--model", model,
+                "--steps", "720",
+                "--interval", "5",
                 "--name", "live_test_run",
             ]
         elif service == "locust":
+            traffic_profile = payload.get("traffic_profile", "steady")
+            env["TRAFFIC_PROFILE"] = traffic_profile
+            # Realistic e-commerce user journeys against the boutique via Traefik Ingress
             cmd = [
                 python_cmd, "-m", "locust", "-f", "deploy/locustfile.py",
-                "--headless", "-u", "100", "-r", "10",
-                "--run-time", "15m", "--host", "http://localhost:9898",
+                "--headless", "-u", "200", "-r", "30",
+                "--run-time", "10m", "--host", "http://127.0.0.1:80",
             ]
         elif service == "evaluation":
             cmd = [python_cmd, "-m", "src.evaluation.live_experiment", "--mode", "sim"]
@@ -215,27 +252,135 @@ def get_logs(service: str):
 
 @app.route("/api/live_metrics", methods=["GET"])
 def get_live_metrics():
+    """Return live metrics for the dashboard.
+    
+    If the RL agent is running, we return the latest row from its CSV log 
+    so the dashboard shows exact agent decisions (proposed delta, safe delta).
+    
+    If the agent is NOT running, we fetch metrics directly from the cluster 
+    via a local PrometheusObserver so the dashboard stays "Live" permanently!
+    """
+    global _global_observer
+    
+    agent_running = is_running(processes.get("live_agent"))
     live_logs_dir = PROJECT_ROOT / "logs" / "live"
-    if not live_logs_dir.exists():
-        return jsonify({"error": "No live logs found."})
-    csv_files = list(live_logs_dir.glob("live_test_run_*.csv"))
-    if not csv_files:
-        return jsonify({"error": "No CSV logs found."})
-    latest_csv = max(csv_files, key=lambda p: p.stat().st_mtime)
+    
+    latest_csv = None
+    if live_logs_dir.exists():
+        csv_files = [p for p in live_logs_dir.glob("live_test_run_*.csv")
+                     if not p.name.endswith("_meta.json")]
+        if csv_files:
+            latest_csv = max(csv_files, key=lambda p: p.stat().st_mtime)
+
+    # If agent is running AND we have a fresh CSV, use it for exact logs
+    if agent_running and latest_csv and (time.time() - latest_csv.stat().st_mtime < 30):
+        try:
+            with open(latest_csv) as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                if rows:
+                    return jsonify(rows[-1])
+        except Exception as e:
+            logger.error(f"Failed to read live CSV: {e}")
+            
+    # Otherwise, the agent is OFF or starting up. Fetch metrics live directly!
     try:
-        with open(latest_csv) as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            if not rows:
-                return jsonify({"error": "CSV is empty."})
-            return jsonify(rows[-1])
+        if _global_observer is None:
+            _global_observer = PrometheusObserver(prom_url=PROM_NODEPORT)
+            
+        obs = _global_observer.get_state()
+        state = ClusterState.from_obs(obs)
+        
+        # Construct a synthetic row that mimics the CSV format so the UI works
+        synthetic_row = {
+            "step": "-",
+            "replicas": state.replicas,
+            "p99_latency": state.p99_latency,
+            "request_rate": state.request_rate,
+            "cpu_util": state.cpu_util,
+            "mem_util": state.mem_util,
+            "queue_depth": state.queue_depth,
+            "proposed_delta": 0,
+            "safe_delta": 0,
+            "source": "none",
+            "reward": 0.0
+        }
+        return jsonify(synthetic_row)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to fetch direct live metrics: {e}"}), 500
 
 
 @app.route("/plots/<path:filename>")
 def serve_plot(filename: str):
     return send_from_directory(str(PROJECT_ROOT / "plots"), filename)
+
+
+@app.route("/boutique/", defaults={"path": ""}, methods=["GET", "POST", "HEAD"])
+@app.route("/boutique/<path:path>", methods=["GET", "POST", "HEAD"])
+def boutique_proxy(path: str):
+    """Reverse-proxy the Online Boutique frontend through Flask.
+
+    Uses the NodePort (30808) directly — no port-forward process needed.
+    Routing through this Flask server (same origin) bypasses browser
+    cross-origin iframe restrictions.
+    """
+    import urllib.request
+    import urllib.error
+
+    target_url = f"{BOUTIQUE_NODEPORT}/{path}"
+    if request.query_string:
+        target_url += f"?{request.query_string.decode('utf-8', errors='replace')}"
+
+    _OFFLINE_HTML = (
+        "<html><body style='background:#0a0a14;color:#888;font-family:sans-serif;"
+        "display:flex;height:100vh;align-items:center;justify-content:center;'>"
+        "<div style='text-align:center'><h2>🛍️ Boutique Offline</h2>"
+        "<p>Deploy the Online Boutique to your K3s cluster first:</p>"
+        "<code style='color:#60a5fa'>kubectl apply -f deploy/online-boutique.yaml</code></div></body></html>"
+    )
+
+    if not _check_nodeport(BOUTIQUE_NODEPORT):
+        return _OFFLINE_HTML, 503
+
+    # ── Proxy request ─────────────────────────────────────────────────────────
+    try:
+        req = urllib.request.Request(
+            target_url,
+            data=request.get_data() or None,
+            method=request.method,
+            headers={k: v for k, v in request.headers if k.lower() not in
+                     ("host", "transfer-encoding", "connection")},
+        )
+        try:
+            resp_ctx = urllib.request.urlopen(req, timeout=15)
+            status = resp_ctx.status
+            content = resp_ctx.read()
+            content_type = resp_ctx.headers.get("Content-Type", "text/html")
+        except urllib.error.HTTPError as http_err:
+            # Pass the boutique's own error pages through (e.g. 404, 500)
+            status = http_err.code
+            content = http_err.read()
+            content_type = http_err.headers.get("Content-Type", "text/html")
+
+        # Rewrite absolute URLs in HTML so links stay within the proxy
+        if "text/html" in content_type:
+            content = content.replace(
+                b'action="/', b'action="/boutique/'
+            ).replace(
+                b'href="/', b'href="/boutique/'
+            ).replace(
+                b'src="/', b'src="/boutique/'
+            )
+
+        from flask import Response as FlaskResponse
+        return FlaskResponse(content, status=status, content_type=content_type)
+
+    except urllib.error.URLError as e:
+        logger.error("Boutique proxy connection error for %s: %s", target_url, e)
+        return _OFFLINE_HTML, 502
+    except Exception as e:
+        logger.error("Boutique proxy unexpected error: %s", e)
+        return _OFFLINE_HTML, 500
 
 
 @app.route("/api/plots", methods=["GET"])

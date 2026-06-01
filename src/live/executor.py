@@ -69,18 +69,18 @@ class K8sPatchExecutor:
         # 2. Build patch body
         patch_body = {"spec": {"replicas": target}}
 
-        # 3. Call Kubernetes API
+        # 3. Call Kubernetes API via kubectl to bypass Python TLS issues
         try:
             logger.info(
-                f"Patching Deployment {self.namespace}/{self.deployment} "
+                f"Scaling Deployment {self.namespace}/{self.deployment} "
                 f"to {target} replicas."
             )
-            self.apps_v1.patch_namespaced_deployment_scale(
-                name=self.deployment,
-                namespace=self.namespace,
-                body=patch_body,
-            )
+            import subprocess
+            subprocess.check_call([
+                "kubectl", "scale", "deployment", self.deployment,
+                "-n", self.namespace, f"--replicas={target}"
+            ], timeout=10)
         except Exception as e:
-            logger.error(f"Failed to patch deployment {self.deployment}: {e}")
+            logger.error(f"Failed to scale deployment {self.deployment}: {e}")
             # We log and swallow the exception so the control loop continues.
             # Next iteration might succeed.
